@@ -122,17 +122,7 @@ class Settings:
         if configured:
             return Path(configured).expanduser().resolve()
 
-        candidates = (
-            self.models_dir / "yolov8s_ap.onnx",
-            self.models_dir / "yolov8s_ap.pt",
-            self.models_dir / "Yolov8m_3class.pt",
-            self.models_dir / "model.onnx",
-        )
-        for candidate in candidates:
-            if candidate.exists():
-                return candidate
-
-        return self.models_dir / "yolov8s_ap.pt"
+        return self.models_dir / "yolov8s_ap.onnx"
 
     def ensure_directories(self) -> None:
         """Create the directories the application expects at runtime."""
