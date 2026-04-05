@@ -2,19 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 
 import appText from '../content/app-text.vi.json';
 import { API_BASE } from '../services/api';
+import type { VideoAlert } from '../types';
 import { getColor } from './BBoxCanvas';
-
-type VideoAlert = {
-  id: string;
-  timestamp_sec: number;
-  class_name: string;
-  confidence: number;
-  crop: string; // data URL
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-};
+import { AlertDetailModal } from './AlertDetailModal';
 
 function formatTime(sec: number): string {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -31,7 +21,7 @@ export function VideoTracking() {
   const [isPaused, setIsPaused] = useState(false);
   const [frozenFrame, setFrozenFrame] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<VideoAlert[]>([]);
-  const [seekingId, setSeekingId] = useState<string | null>(null);
+  const [selectedAlert, setSelectedAlert] = useState<VideoAlert | null>(null);
 
   const imgRef = useRef<HTMLImageElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -144,18 +134,7 @@ export function VideoTracking() {
   };
 
   const handleAlertClick = (alert: VideoAlert) => {
-    if (!videoId || !fileName) return;
-    setSeekingId(alert.id);
-    setIsPaused(false);
-    setFrozenFrame(null);
-    setAlerts([]); // will be repopulated by poll
-
-    const url = `${API_BASE}/api/stream/video?video_id=${encodeURIComponent(videoId)}&file_name=${encodeURIComponent(fileName)}&start_sec=${alert.timestamp_sec}`;
-    setStreamUrl(url);
-    setStatusMessage(appText.videoTracking.streamingStatus);
-
-    videoContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => setSeekingId(null), 2500);
+    setSelectedAlert(alert);
   };
 
   return (
@@ -169,7 +148,7 @@ export function VideoTracking() {
 
       {/* Video player / upload zone */}
       {streamUrl ? (
-        <div ref={videoContainerRef} className={`overflow-hidden rounded-[1.75rem] border bg-stone-950 transition ${seekingId ? 'border-amber-400/50 shadow-[0_0_20px_rgba(251,191,36,0.15)]' : 'border-white/10'}`}>
+        <div ref={videoContainerRef} className="overflow-hidden rounded-[1.75rem] border bg-stone-950 border-white/10 transition">
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <p className="text-sm font-semibold text-white">{appText.videoTracking.sectionTitle}</p>
             <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-emerald-200">
@@ -256,7 +235,7 @@ export function VideoTracking() {
           <div className="grid gap-3 md:grid-cols-2">
             {alerts.map((alert) => {
               const color = getColor(alert.class_name);
-              const isActive = seekingId === alert.id;
+              const isActive = selectedAlert?.id === alert.id;
               return (
                 <button
                   key={alert.id}
@@ -291,7 +270,7 @@ export function VideoTracking() {
                         {formatTime(alert.timestamp_sec)}
                       </span>
                       <p className="mt-2 text-xs text-stone-500 group-hover:text-stone-400">
-                        Click to seek ↑
+                        Click to view ↗
                       </p>
                     </div>
                   </div>
@@ -300,6 +279,14 @@ export function VideoTracking() {
             })}
           </div>
         </section>
+      )}
+
+      {selectedAlert && videoId && (
+        <AlertDetailModal
+          alert={selectedAlert}
+          videoId={videoId}
+          onClose={() => setSelectedAlert(null)}
+        />
       )}
     </div>
   );

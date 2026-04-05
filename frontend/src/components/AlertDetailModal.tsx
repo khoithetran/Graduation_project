@@ -1,18 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../services/api';
+import type { VideoAlert } from '../types';
 import { getColor } from './BBoxCanvas';
-
-type VideoAlert = {
-  id: string;
-  timestamp_sec: number;
-  class_name: string;
-  confidence: number;
-  crop: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-};
 
 interface AlertDetailModalProps {
   alert: VideoAlert;
