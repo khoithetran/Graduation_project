@@ -34,19 +34,20 @@ function drawBbox(
   const ctx = canvas.getContext('2d');
   if (!ctx || !video.videoWidth || !video.videoHeight) return;
 
-  // Match canvas pixel size to rendered video size
-  canvas.width = video.clientWidth;
-  canvas.height = video.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = video.clientWidth * dpr;
+  canvas.height = video.clientHeight * dpr;
+  canvas.style.width = `${video.clientWidth}px`;
+  canvas.style.height = `${video.clientHeight}px`;
 
   const scaleX = video.clientWidth / video.videoWidth;
   const scaleY = video.clientHeight / video.videoHeight;
 
-  // When the video uses object-fit: contain, black bars appear. Adjust for letterboxing.
   const renderedW = video.videoWidth * Math.min(scaleX, scaleY);
   const renderedH = video.videoHeight * Math.min(scaleX, scaleY);
-  const offsetX = (video.clientWidth - renderedW) / 2;
-  const offsetY = (video.clientHeight - renderedH) / 2;
-  const s = Math.min(scaleX, scaleY);
+  const offsetX = (video.clientWidth - renderedW) * dpr / 2;
+  const offsetY = (video.clientHeight - renderedH) * dpr / 2;
+  const s = Math.min(scaleX, scaleY) * dpr;
 
   const sx = alert.x1 * s + offsetX;
   const sy = alert.y1 * s + offsetY;
@@ -136,6 +137,9 @@ export function AlertDetailModal({ alert, videoId, onClose }: AlertDetailModalPr
 
   const handleEnded = () => {
     setIsPlaying(false);
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (video && canvas) drawBbox(canvas, video, alert);
   };
 
   const togglePlay = () => {
@@ -219,15 +223,9 @@ export function AlertDetailModal({ alert, videoId, onClose }: AlertDetailModalPr
           {/* Play/pause overlay icon */}
           <div className={`pointer-events-none absolute inset-0 flex items-center justify-center transition-opacity ${isPlaying ? 'opacity-0' : 'opacity-100'}`}>
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60 backdrop-blur">
-              {isPlaying ? (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 text-white">
-                  <rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" />
-                </svg>
-              ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 translate-x-0.5 text-white">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-              )}
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 translate-x-0.5 text-white">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
             </div>
           </div>
         </div>
