@@ -1,0 +1,159 @@
+"""Application settings and path configuration."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+
+
+def _parse_csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """Parse a comma-separated environment variable into a tuple."""
+    raw_value = os.getenv(name, "")
+    if not raw_value.strip():
+        return default
+    return tuple(item.strip() for item in raw_value.split(",") if item.strip())
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    """Runtime configuration for the backend application."""
+
+    root_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
+    app_name: str = "Safety Helmet Detection API"
+    app_version: str = "1.0.0"
+    api_prefix: str = "/api"
+    host: str = field(default_factory=lambda: os.getenv("HOST", "0.0.0.0"))
+    port: int = field(default_factory=lambda: int(os.getenv("PORT", "8000")))
+    confidence_threshold: float = field(
+        default_factory=lambda: float(os.getenv("CONFIDENCE_THRESHOLD", "0.25"))
+    )
+    image_size: int = field(default_factory=lambda: int(os.getenv("IMAGE_SIZE", "640")))
+    update_required_count: int = field(
+        default_factory=lambda: int(os.getenv("UPDATE_REQUIRED_COUNT", "100"))
+    )
+    stream_window_size: int = field(
+        default_factory=lambda: int(os.getenv("STREAM_WINDOW_SIZE", "30"))
+    )
+    stream_event_threshold: int = field(
+        default_factory=lambda: int(os.getenv("STREAM_EVENT_THRESHOLD", "20"))
+    )
+    target_stream_fps: float = field(
+        default_factory=lambda: float(os.getenv("TARGET_STREAM_FPS", "10"))
+    )
+    log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+    cors_origins: tuple[str, ...] = field(
+        default_factory=lambda: _parse_csv_env(
+            "CORS_ORIGINS",
+            (
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ),
+        )
+    )
+    allowed_image_content_types: tuple[str, ...] = ("image/jpeg", "image/png")
+    allowed_model_suffixes: tuple[str, ...] = (".pt", ".onnx", ".engine")
+
+    @property
+    def data_dir(self) -> Path:
+        """Return the top-level data directory."""
+        return self.root_dir / "data"
+
+    @property
+    def models_dir(self) -> Path:
+        """Return the model weights directory."""
+        return self.root_dir / "models"
+
+    @property
+    def history_dir(self) -> Path:
+        """Return the persisted history directory."""
+        return self.data_dir / "history"
+
+    @property
+    def history_global_dir(self) -> Path:
+        """Return the directory for full-frame history images."""
+        return self.history_dir / "global"
+
+    @property
+    def history_crops_dir(self) -> Path:
+        """Return the directory for cropped violation images."""
+        return self.history_dir / "crops"
+
+    @property
+    def history_jsonl(self) -> Path:
+        """Return the JSONL file that stores history events."""
+        return self.history_dir / "history.jsonl"
+
+    @property
+    def videos_dir(self) -> Path:
+        """Return the directory for uploaded videos."""
+        return self.data_dir / "videos"
+
+    @property
+    def temp_videos_dir(self) -> Path:
+        """Return the directory for temporary uploaded videos."""
+        return self.data_dir / "temp_videos"
+
+    @property
+    def update_pool_dir(self) -> Path:
+        """Return the update-pool root directory."""
+        return self.data_dir / "update_pool"
+
+    @property
+    def update_pool_images_dir(self) -> Path:
+        """Return the directory for accepted update images."""
+        return self.update_pool_dir / "images"
+
+    @property
+    def update_pool_labels_dir(self) -> Path:
+        """Return the directory for accepted update labels."""
+        return self.update_pool_dir / "labels"
+
+    @property
+    def update_pool_meta_path(self) -> Path:
+        """Return the JSONL file storing update-pool review metadata."""
+        return self.update_pool_dir / "accepted.jsonl"
+
+    @property
+    def model_path(self) -> Path:
+        """Resolve the configured model path."""
+        configured = os.getenv("MODEL_PATH")
+        if configured:
+            return Path(configured).expanduser().resolve()
+
+        candidates = (
+            self.models_dir / "yolov8s_ap.onnx",
+            self.models_dir / "yolov8s_ap.pt",
+            self.models_dir / "Yolov8m_3class.pt",
+            self.models_dir / "model.onnx",
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        return self.models_dir / "yolov8s_ap.pt"
+
+    def ensure_directories(self) -> None:
+        """Create the directories the application expects at runtime."""
+        for path in (
+            self.data_dir,
+            self.models_dir,
+            self.history_dir,
+            self.history_global_dir,
+            self.history_crops_dir,
+            self.videos_dir,
+            self.temp_videos_dir,
+            self.update_pool_dir,
+            self.update_pool_images_dir,
+            self.update_pool_labels_dir,
+        ):
+            path.mkdir(parents=True, exist_ok=True)
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return a cached settings instance."""
+    settings = Settings()
+    settings.ensure_directories()
+    return settings

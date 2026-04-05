@@ -1,0 +1,18 @@
+# Custom ByteTrack config for sparse-frame video inference.
+#
+# Key changes vs. the Ultralytics default:
+#   track_buffer: 90   — 3× the inference interval (30 frames), so a track
+#                         survives across at least 3 skipped-frame gaps before
+#                         being marked as lost.
+#   track_high_thresh / new_track_thresh: lowered to 0.25 to match the YOLO
+#                         confidence threshold, so every detected object can
+#                         start or continue a track (default 0.5 would silently
+#                         ignore detections with 0.25–0.49 confidence).
+
+tracker_type: bytetrack
+track_high_thresh: 0.25
+track_low_thresh: 0.1
+new_track_thresh: 0.25
+track_buffer: 90
+match_thresh: 0.8
+fuse_score: True

@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile
+    container_name: safety-helmet-app
+    env_file:
+      - ../.env                          # optional — overrides defaults below if file exists
+    environment:
+      MODEL_PATH: /app/models/yolov8s_ap.onnx
+      CONFIDENCE_THRESHOLD: "0.25"
+      PORT: "8000"           # override the Dockerfile default of 7860 for local use
+      LOG_LEVEL: "INFO"
+      CORS_ORIGINS: "http://localhost:8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data        # persist history & uploaded videos outside the container
+      - ../models:/app/models    # swap models without rebuilding the image
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
