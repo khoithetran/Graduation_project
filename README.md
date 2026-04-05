@@ -104,14 +104,14 @@ Real-world validation results on construction site footage:
 
 | Sample 1 | Sample 2 |
 |:---------:|:---------:|
-| ![Detection Sample](https://huggingface.co/spaces/letsgobae/safety-helmet-detection/blob/main/demo/image_demo_1.jpg) | ![Detection Sample](https://huggingface.co/spaces/letsgobae/safety-helmet-detection/blob/main/demo/image_demo_2.jpg) |
+| ![Detection Sample](demo\image_demo_1.jpg) | ![Detection Sample](demo\image_demo_2.jpg) |
 | Multi-person helmet detection with confidence scores | No-helmet violation flagged and tracked across frames |
 
 ### Video Demo
 
 Real-time ByteTrack tracking demonstration:
 
-[`demo/video_demo.mp4`](https://huggingface.co/spaces/letsgobae/safety-helmet-detection/blob/main/demo/video_demo.mp4)
+[`demo/video_demo.mp4`](demo\video_demo.mp4)
 
 > GitHub and Hugging Face Spaces do not autoplay MP4 files in the README. Click the link above to download or preview. Alternatively, upload any construction site video directly in the [live demo](https://huggingface.co/spaces/letsgobae/safety-helmet-detection).
 
