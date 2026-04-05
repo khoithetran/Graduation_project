@@ -41,7 +41,6 @@ COPY src ./src
 COPY backend ./backend
 
 # Runtime data directories (actual files are mounted via volume in production)
-COPY data ./data
 COPY models ./models
 
 # Copy built frontend from Stage 1
