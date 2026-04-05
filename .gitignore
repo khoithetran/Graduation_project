@@ -43,14 +43,6 @@ frontend/dist/
 frontend/.vite/
 
 # Runtime data — gitkeep placeholders keep dirs in tree; contents are excluded
-data/temp_videos/
-data/videos/
-data/history/crops/
-data/history/global/
-data/history/history.jsonl
-data/update_pool/images/
-data/update_pool/labels/
-data/update_pool/accepted.jsonl
 *.log
 
 # Local backend leftovers
