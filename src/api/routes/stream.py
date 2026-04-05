@@ -7,7 +7,7 @@ from pathlib import Path
 import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from src.api.schemas import LiveStartResponse, UploadVideoResponse, VideoDetectResponse
 from src.config.settings import get_settings
@@ -70,6 +70,19 @@ async def upload_video(file: UploadFile = File(...)) -> UploadVideoResponse:
 def stream_video_alerts(video_id: str = Query(...)) -> list[dict]:
     """Return accumulated violation alerts for a streaming video."""
     return VIDEO_ALERTS.get(video_id, [])
+
+
+@router.get("/api/video/file/{video_id}")
+def get_video_file(video_id: str) -> FileResponse:
+    """Serve the raw uploaded video with Range header support for browser seeking."""
+    matches = list(settings.videos_dir.glob(f"{video_id}__*"))
+    if not matches:
+        raise HTTPException(status_code=404, detail="Video file not found.")
+    video_path = matches[0]
+    suffix = video_path.suffix.lower()
+    media_types = {".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime"}
+    media_type = media_types.get(suffix, "video/mp4")
+    return FileResponse(str(video_path), media_type=media_type)
 
 
 @router.get("/api/stream/video")
