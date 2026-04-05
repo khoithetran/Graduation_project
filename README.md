@@ -1,3 +1,12 @@
+---
+title: Safety Helmet Detection
+emoji: 👷
+colorFrom: yellow
+colorTo: gray
+sdk: docker
+pinned: false
+---
+
 # Phát Hiện Mũ Bảo Hộ
 
 Ứng dụng FastAPI + Streamlit để phát hiện mũ bảo hộ theo thời gian thực sử dụng YOLOv8.
