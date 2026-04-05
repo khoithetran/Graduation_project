@@ -53,14 +53,6 @@ data/update_pool/labels/
 data/update_pool/accepted.jsonl
 *.log
 
-# Model weights and inference artifacts
-models/*.pt
-models/*.onnx
-models/*.engine
-*.pt
-*.onnx
-*.engine
-
 # Local backend leftovers
 backend/__pycache__/
 
