@@ -14,7 +14,6 @@ function formatTime(sec: number): string {
 
 export function VideoTracking() {
   const [videoId, setVideoId] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState(appText.videoTracking.defaultStatus);
@@ -24,7 +23,6 @@ export function VideoTracking() {
   const [selectedAlert, setSelectedAlert] = useState<VideoAlert | null>(null);
 
   const imgRef = useRef<HTMLImageElement>(null);
-  const videoContainerRef = useRef<HTMLDivElement>(null);
 
   // Poll for alerts while a video is streaming
   useEffect(() => {
@@ -78,7 +76,6 @@ export function VideoTracking() {
     setFrozenFrame(null);
     setAlerts([]);
     setVideoId(null);
-    setFileName(null);
     setStatusMessage(appText.videoTracking.uploadLoading);
 
     try {
@@ -91,7 +88,6 @@ export function VideoTracking() {
         file_name: string;
       };
       setVideoId(video_id);
-      setFileName(file_name);
       const url = `${API_BASE}/api/stream/video?video_id=${encodeURIComponent(video_id)}&file_name=${encodeURIComponent(file_name)}`;
       setStreamUrl(url);
       setStatusMessage(appText.videoTracking.streamingStatus);
@@ -109,7 +105,6 @@ export function VideoTracking() {
     setFrozenFrame(null);
     setAlerts([]);
     setVideoId(null);
-    setFileName(null);
     setStatusMessage(appText.videoTracking.defaultStatus);
   };
 
@@ -148,7 +143,7 @@ export function VideoTracking() {
 
       {/* Video player / upload zone */}
       {streamUrl ? (
-        <div ref={videoContainerRef} className="overflow-hidden rounded-[1.75rem] border bg-stone-950 border-white/10 transition">
+        <div className="overflow-hidden rounded-[1.75rem] border bg-stone-950 border-white/10 transition">
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <p className="text-sm font-semibold text-white">{appText.videoTracking.sectionTitle}</p>
             <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-emerald-200">
