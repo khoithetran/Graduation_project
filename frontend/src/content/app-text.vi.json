@@ -1,0 +1,70 @@
+{
+  "meta": {
+    "locale": "vi-VN",
+    "apiLabel": "API",
+    "detectionsLabel": "Kết quả nhận diện"
+  },
+  "header": {
+    "badge": "Nhận diện Mũ Bảo hộ",
+    "title": "Bảng điều khiển Giám sát PPE",
+    "description": "Hệ thống AI giám sát an toàn lao động. Tải ảnh để nhận diện mũ bảo hộ qua đầu cuối /predict hoặc tải video để theo dõi đối tượng theo thời gian thực."
+  },
+  "actions": {
+    "uploadIdle": "Tải ảnh lên để nhận diện",
+    "uploadLoading": "Đang xử lý..."
+  },
+  "preview": {
+    "title": "Xem trước Video",
+    "liveBadge": "Trực tiếp",
+    "cameraConnecting": "Đang kết nối webcam...",
+    "cameraReady": "Chế độ xem trực tiếp từ webcam đã sẵn sàng.",
+    "cameraUnavailable": "Không thể truy cập webcam. Bạn vẫn có thể tải ảnh để nhận diện."
+  },
+  "upload": {
+    "sectionTitle": "Trạng thái tải lên",
+    "defaultFileName": "Chưa có tệp được chọn",
+    "defaultStatus": "Chọn một ảnh công trường để gửi đến dịch vụ /predict.",
+    "sendingStatus": "Đang gửi ảnh đến /predict...",
+    "successFoundPrefix": "Nhận diện hoàn tất: Tìm thấy",
+    "successFoundSuffix": "đối tượng.",
+    "successEmpty": "Nhận diện hoàn tất: Không tìm thấy đối tượng nào trong ảnh.",
+    "failure": "Gửi ảnh thất bại. Vui lòng kiểm tra lại Backend và thử lại."
+  },
+  "imagePreview": {
+    "title": "Xem trước ảnh đã tải",
+    "empty": "Chưa có ảnh được chọn. Hãy tải một ảnh định dạng JPG/PNG để xem kết quả nhận diện."
+  },
+  "results": {
+    "title": "Kết quả Nhận diện",
+    "description": "Kết quả được trả về trực tiếp từ đầu cuối /predict.",
+    "empty": "Chưa có dữ liệu nhận diện. Hãy tải ảnh để bắt đầu.",
+    "topLeft": "Góc trên bên trái",
+    "bottomRight": "Góc dưới bên phải"
+  },
+  "history": {
+    "eyebrow": "Lịch sử",
+    "title": "5 trường hợp vi phạm gần nhất",
+    "itemsSuffix": "mục",
+    "loading": "Đang tải lịch sử...",
+    "empty": "Chưa có vi phạm nào trong lịch sử.",
+    "noPreview": "Không có ảnh xem trước",
+    "objectsSuffix": "đối tượng",
+    "cropsSuffix": "ảnh cắt",
+    "loadFailed": "Không thể tải lịch sử từ Backend. Vui lòng kiểm tra FastAPI và thử lại."
+  },
+  "tabs": {
+    "imageDetection": "Nhận diện Ảnh",
+    "videoTracking": "Theo dõi Video"
+  },
+  "videoTracking": {
+    "sectionTitle": "Theo dõi đối tượng qua video",
+    "uploadIdle": "Tải video lên để theo dõi",
+    "uploadLoading": "Đang tải video...",
+    "streamingStatus": "Đang phát luồng theo dõi",
+    "defaultStatus": "Chọn một tệp video để bắt đầu xử lý và theo dõi đối tượng.",
+    "failure": "Tải video thất bại. Vui lòng kiểm tra lại Backend và thử lại."
+  },
+  "bboxControls": {
+    "opacityLabel": "Độ mờ hộp nhận diện"
+  }
+}

@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    @apply bg-[#120f0d];
+  }
+
+  body {
+    @apply min-h-screen bg-[#120f0d] text-stone-100;
+    margin: 0;
+    font-family: "Space Grotesk", "Trebuchet MS", "Segoe UI", sans-serif;
+    background-image:
+      radial-gradient(circle at top, rgba(251, 191, 36, 0.12), transparent 34%),
+      radial-gradient(circle at right, rgba(248, 113, 113, 0.12), transparent 28%),
+      linear-gradient(180deg, #181411 0%, #0c0a09 100%);
+  }
+
+  #root {
+    @apply min-h-screen;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-stone-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-stone-600;
+}
+
+.bg-app-pattern {
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(251, 191, 36, 0.12), transparent 22%),
+    radial-gradient(circle at 80% 10%, rgba(239, 68, 68, 0.1), transparent 18%),
+    linear-gradient(180deg, rgba(28, 25, 23, 0.55), rgba(12, 10, 9, 0.95));
+}

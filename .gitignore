@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment variables and secrets
+.env
+.env.*
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# IDE and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+.DS_Store
+.superpowers/
+.worktrees/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Runtime data — gitkeep placeholders keep dirs in tree; contents are excluded
+data/temp_videos/
+data/videos/
+data/history/crops/
+data/history/global/
+data/history/history.jsonl
+data/update_pool/images/
+data/update_pool/labels/
+data/update_pool/accepted.jsonl
+*.log
+
+# Model weights and inference artifacts
+models/*.pt
+models/*.onnx
+models/*.engine
+*.pt
+*.onnx
+*.engine
+
+# Local backend leftovers
+backend/__pycache__/
+
+# Claude Code internal
+.claude/
+
+# Superpowers plugin docs (auto-managed by plugin)
+docs/superpowers/
