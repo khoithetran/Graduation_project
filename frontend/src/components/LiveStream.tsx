@@ -74,6 +74,8 @@ export function LiveStream() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  // Store stream separately — videoRef.current becomes null when <video> is removed from DOM
+  const activeStreamRef = useRef<MediaStream | null>(null);
 
   // ── Webcam mode ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -90,6 +92,7 @@ export function LiveStream() {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
+        activeStreamRef.current = stream;
         const video = videoRef.current;
         if (!video) return;
         video.srcObject = stream;
@@ -117,7 +120,11 @@ export function LiveStream() {
               method: 'POST',
               body: form,
             });
-            if (!res.ok || cancelled) return;
+            if (cancelled) return;
+            if (!res.ok) {
+              console.error('Webcam frame error:', res.status, await res.text());
+              return;
+            }
             const data = (await res.json()) as {
               detections: FrameDetection[];
               alerts: LiveAlert[];
@@ -129,8 +136,8 @@ export function LiveStream() {
             if (data.alerts.length > 0) {
               setAlerts((prev) => [...data.alerts, ...prev].slice(0, 50));
             }
-          } catch {
-            // Network error on a single frame — skip silently
+          } catch (err) {
+            console.error('Webcam frame fetch failed:', err);
           }
         }, 150);
       } catch {
@@ -146,10 +153,10 @@ export function LiveStream() {
     return () => {
       cancelled = true;
       if (intervalId !== undefined) clearInterval(intervalId);
-      const video = videoRef.current;
-      if (video?.srcObject) {
-        (video.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-        video.srcObject = null;
+      // Use activeStreamRef — guaranteed non-null even after <video> is removed from DOM
+      if (activeStreamRef.current) {
+        activeStreamRef.current.getTracks().forEach((t) => t.stop());
+        activeStreamRef.current = null;
       }
       if (overlayRef.current) {
         overlayRef.current.getContext('2d')?.clearRect(
