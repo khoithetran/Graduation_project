@@ -9,3 +9,11 @@ export type VideoAlert = {
   x2: number;
   y2: number;
 };
+
+export type LiveAlert = {
+  id: string;
+  wall_time: string;
+  class_name: string;
+  confidence: number;
+  crop: string;
+};
