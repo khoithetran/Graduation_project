@@ -227,6 +227,103 @@ class FrameDetection:
     y2: int
 
 
+def process_webcam_frame(
+    frame_bytes: bytes,
+    session_id: str,
+    predictor: Predictor,
+) -> dict:
+    """Process a single JPEG webcam frame and return detections + any new alerts.
+
+    Uses ``predictor.predict()`` (not ``track_frame``) to avoid sharing
+    ByteTrack internal state across concurrent sessions.
+    """
+    now = time.time()
+
+    # Lazy cleanup: remove sessions that have been idle longer than the TTL
+    expired = [
+        sid for sid, sess in list(WEBCAM_SESSIONS.items())
+        if now - sess.last_active > _WEBCAM_SESSION_TTL
+    ]
+    for sid in expired:
+        del WEBCAM_SESSIONS[sid]
+
+    # Get or create session with capacity cap
+    if session_id not in WEBCAM_SESSIONS:
+        if len(WEBCAM_SESSIONS) >= _MAX_WEBCAM_SESSIONS:
+            WEBCAM_SESSIONS.popitem(last=False)
+        WEBCAM_SESSIONS[session_id] = _WebcamSession()
+
+    session = WEBCAM_SESSIONS[session_id]
+    session.last_active = now
+    WEBCAM_SESSIONS.move_to_end(session_id)
+
+    # Decode JPEG bytes to BGR numpy frame
+    img_array = np.frombuffer(frame_bytes, np.uint8)
+    frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    if frame is None:
+        logger.warning("process_webcam_frame: could not decode JPEG for session %s", session_id)
+        return {"detections": [], "alerts": []}
+
+    height, width = frame.shape[:2]
+
+    # Run inference (predict, not track, to keep sessions isolated)
+    try:
+        results = predictor.predict(frame)
+    except Exception:
+        logger.exception("process_webcam_frame: prediction failed for session %s.", session_id)
+        return {"detections": [], "alerts": []}
+
+    detections_out: list[dict] = []
+    new_alerts: list[dict] = []
+    violation_hit_ids: set[int] = set()
+
+    if results:
+        result = results[0]
+        if result.boxes is not None:
+            for box in result.boxes:
+                class_id = int(box.cls[0].item())
+                class_name = str(result.names.get(class_id, str(class_id)))
+                confidence = float(box.conf[0].item())
+                x1, y1, x2, y2 = box.xyxy[0].tolist()
+                x1_i, y1_i, x2_i, y2_i = clamp_bbox(x1, y1, x2, y2, width=width, height=height)
+                if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
+                    continue
+
+                detections_out.append({
+                    "class_name": class_name,
+                    "confidence": round(confidence, 4),
+                    "x1": x1_i,
+                    "y1": y1_i,
+                    "x2": x2_i,
+                    "y2": y2_i,
+                })
+
+                if is_head_class(class_name) or is_nonhelmet_class(class_name):
+                    # IoU-only pseudo-ID matching (no ByteTrack IDs available)
+                    resolved_id = session.tracker.resolve_id(None, (x1_i, y1_i, x2_i, y2_i))
+                    violation_hit_ids.add(resolved_id)
+                    if session.tracker.record_hit(resolved_id):
+                        logger.info(
+                            "Webcam alert: session=%s class=%s", session_id, class_name
+                        )
+                        crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
+                        if crop_data:
+                            alert = {
+                                "id": uuid.uuid4().hex,
+                                "wall_time": datetime.now().strftime("%H:%M:%S"),
+                                "class_name": class_name,
+                                "confidence": round(confidence, 4),
+                                "crop": crop_data,
+                            }
+                            if len(session.alerts) < _MAX_ALERTS_PER_VIDEO:
+                                session.alerts.append(alert)
+                            new_alerts.append(alert)
+
+    session.tracker.tick_absences(violation_hit_ids)
+
+    return {"detections": detections_out, "alerts": new_alerts}
+
+
 def register_uploaded_video(filename: str, raw_bytes: bytes) -> UploadVideoResponse:
     """Persist an uploaded video and return its lookup identifiers."""
     video_id = uuid.uuid4().hex
