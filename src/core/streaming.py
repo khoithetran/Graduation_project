@@ -620,7 +620,7 @@ def generate_processed_video_stream(
 
 
 def generate_live_stream(live_id: str, predictor: Predictor):
-    """Yield an MJPEG stream for a registered live source."""
+    """Yield an MJPEG stream for a registered live source using ByteTrack."""
     live_cfg = LIVE_STREAMS.get(live_id)
     if live_cfg is None:
         raise KeyError(f"Live stream '{live_id}' was not found.")
@@ -629,12 +629,12 @@ def generate_live_stream(live_id: str, predictor: Predictor):
     if not cap.isOpened():
         raise ValueError(f"Khong mo duoc live stream: {live_cfg['url']}")
 
-    window_head = deque(maxlen=settings.stream_window_size)
-    window_nonhelmet = deque(maxlen=settings.stream_window_size)
-    prev_head_count = 0
-    prev_nonhelmet_count = 0
+    _reset_live_alerts(live_id)
+    violation_tracker = _ViolationTracker()
+
     last_send_time = time.perf_counter()
     target_dt = 1.0 / settings.target_stream_fps
+    frame_idx = 0
 
     try:
         while True:
@@ -647,62 +647,71 @@ def generate_live_stream(live_id: str, predictor: Predictor):
             if elapsed < target_dt:
                 continue
             last_send_time = time.perf_counter()
+            frame_idx += 1
 
-            detections = extract_frame_detections(frame, predictor)
-            frame_has_head = False
-            frame_has_nonhelmet = False
-            crop_candidates: list[tuple[str, int, int, int, int]] = []
+            try:
+                results = predictor.track_frame(frame, tracker=_VIDEO_TRACKER_CFG)
+            except Exception:
+                logger.exception("ByteTrack failed for live frame %d (live_id=%s).", frame_idx, live_id)
+                results = []
 
-            for detection in detections:
-                if is_head_class(detection.class_name):
-                    frame_has_head = True
-                if is_nonhelmet_class(detection.class_name):
-                    frame_has_nonhelmet = True
-                if is_head_class(detection.class_name) or is_nonhelmet_class(detection.class_name):
-                    crop_candidates.append(
-                        (
-                            detection.class_name,
-                            detection.x1,
-                            detection.y1,
-                            detection.x2,
-                            detection.y2,
+            violation_hit_ids: set[int] = set()
+
+            if results:
+                result = results[0]
+                boxes = result.boxes
+                if boxes is not None:
+                    has_ids = boxes.id is not None
+                    height, width = frame.shape[:2]
+                    for i in range(len(boxes)):
+                        box = boxes[i]
+                        class_id = int(box.cls[0].item())
+                        class_name = str(result.names.get(class_id, str(class_id)))
+                        confidence = float(box.conf[0].item())
+                        x1, y1, x2, y2 = box.xyxy[0].tolist()
+                        x1_i, y1_i, x2_i, y2_i = clamp_bbox(
+                            x1, y1, x2, y2, width=width, height=height
                         )
-                    )
+                        if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
+                            continue
 
-                draw_detection(
-                    frame,
-                    class_name=detection.class_name,
-                    confidence=detection.confidence,
-                    x1=detection.x1,
-                    y1=detection.y1,
-                    x2=detection.x2,
-                    y2=detection.y2,
-                )
+                        raw_bt_id: int | None = None
+                        if has_ids:
+                            val = boxes.id[i].item()
+                            if val == val:  # NaN check
+                                raw_bt_id = int(val)
 
-            window_head.append(1 if frame_has_head else 0)
-            window_nonhelmet.append(1 if frame_has_nonhelmet else 0)
-            head_count = sum(window_head)
-            nonhelmet_count = sum(window_nonhelmet)
-            pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                        if is_head_class(class_name) or is_nonhelmet_class(class_name):
+                            resolved_id = violation_tracker.resolve_id(
+                                raw_bt_id, (x1_i, y1_i, x2_i, y2_i)
+                            )
+                            violation_hit_ids.add(resolved_id)
+                            if violation_tracker.record_hit(resolved_id):
+                                logger.info(
+                                    "Live alert: live_id=%s class=%s", live_id, class_name
+                                )
+                                crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
+                                if crop_data:
+                                    _append_live_alert(live_id, {
+                                        "id": uuid.uuid4().hex,
+                                        "wall_time": datetime.now().strftime("%H:%M:%S"),
+                                        "class_name": class_name,
+                                        "confidence": round(confidence, 4),
+                                        "crop": crop_data,
+                                    })
 
-            if prev_nonhelmet_count < settings.stream_event_threshold <= nonhelmet_count:
-                persist_window_event(
-                    image=pil_frame,
-                    source=live_cfg["source"],
-                    event_type="NGHI_NGO",
-                    crop_candidates=crop_candidates,
-                )
+                        draw_detection(
+                            frame,
+                            class_name=class_name,
+                            confidence=confidence,
+                            x1=x1_i,
+                            y1=y1_i,
+                            x2=x2_i,
+                            y2=y2_i,
+                            track_id=raw_bt_id,
+                        )
 
-            if prev_head_count < settings.stream_event_threshold <= head_count:
-                persist_window_event(
-                    image=pil_frame,
-                    source=live_cfg["source"],
-                    event_type="VI_PHAM",
-                    crop_candidates=crop_candidates,
-                )
-
-            prev_head_count = head_count
-            prev_nonhelmet_count = nonhelmet_count
+            violation_tracker.tick_absences(violation_hit_ids)
 
             frame_bytes = encode_jpeg(frame)
             if frame_bytes is None:
