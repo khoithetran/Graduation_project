@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 import logging
 from pathlib import Path
 import time
+from datetime import datetime
 import uuid
 
 import cv2
@@ -34,6 +35,8 @@ _IOU_MATCH_THRESH = 0.30
 # Memory caps for VIDEO_ALERTS
 _MAX_VIDEO_IDS = 50       # max number of video sessions tracked simultaneously
 _MAX_ALERTS_PER_VIDEO = 200  # max alerts stored per video session
+_MAX_WEBCAM_SESSIONS = 20     # max concurrent webcam sessions in memory
+_WEBCAM_SESSION_TTL = 60.0    # seconds before idle webcam session is evicted
 
 
 def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
@@ -170,6 +173,37 @@ class _ViolationTracker:
                 self.last_box.pop(tid, None)
             else:
                 self.history[tid].append(0)
+
+
+@dataclass
+class _WebcamSession:
+    """In-memory state for a single browser webcam session."""
+
+    tracker: _ViolationTracker = field(default_factory=_ViolationTracker)
+    alerts: list[dict] = field(default_factory=list)
+    last_active: float = field(default_factory=time.time)
+
+
+# Keyed by live_id → list of violation alert dicts for IP camera streams.
+LIVE_ALERTS: OrderedDict[str, list[dict]] = OrderedDict()
+
+# Keyed by session_id → _WebcamSession for browser webcam streams.
+WEBCAM_SESSIONS: OrderedDict[str, _WebcamSession] = OrderedDict()
+
+
+def _reset_live_alerts(live_id: str) -> None:
+    """Reset the alerts list for a live stream, evicting oldest if at capacity."""
+    if len(LIVE_ALERTS) >= _MAX_VIDEO_IDS and live_id not in LIVE_ALERTS:
+        LIVE_ALERTS.popitem(last=False)
+    LIVE_ALERTS[live_id] = []
+    LIVE_ALERTS.move_to_end(live_id)
+
+
+def _append_live_alert(live_id: str, alert: dict) -> None:
+    """Append an alert for a live stream, respecting the per-stream cap."""
+    alerts = LIVE_ALERTS.setdefault(live_id, [])
+    if len(alerts) < _MAX_ALERTS_PER_VIDEO:
+        alerts.append(alert)
 
 
 def _crop_b64(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> str:
