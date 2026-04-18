@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 
 from src.api.schemas import HistoryEvent, HistoryLatestResponse
-from src.core.history import get_history_event, get_latest_history_event, load_all_history
+from src.core.history import delete_all_history, get_history_event, get_latest_history_event, load_all_history
 
 router = APIRouter(tags=["history"])
+
+
+@router.delete("/api/history")
+def history_delete() -> Response:
+    """Delete all history events and their associated images."""
+    delete_all_history()
+    return Response(status_code=204)
 
 
 @router.get("/api/history/latest", response_model=HistoryLatestResponse)

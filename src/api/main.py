@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
+import time
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,9 +28,22 @@ logger = logging.getLogger(__name__)
 _FRONTEND_DIST = Path(__file__).resolve().parents[2] / "frontend" / "dist"
 
 
+def _cleanup_old_videos(max_age_hours: int = 24) -> None:
+    """Delete uploaded video files older than max_age_hours from videos_dir."""
+    cutoff = time.time() - max_age_hours * 3600
+    cleaned = 0
+    for video_file in settings.videos_dir.glob("*"):
+        if video_file.is_file() and video_file.stat().st_mtime < cutoff:
+            video_file.unlink(missing_ok=True)
+            cleaned += 1
+    if cleaned:
+        logger.info("Startup cleanup: removed %d old video file(s) from videos_dir.", cleaned)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load the model once on startup and keep the app resilient on failure."""
+    _cleanup_old_videos()
     predictor = get_predictor()
     try:
         predictor.load_model()

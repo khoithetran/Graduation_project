@@ -91,13 +91,64 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 
 ---
 
+## Phase 6 — Các tính năng đã triển khai nhưng chưa có trong kế hoạch
+
+> Phần này ghi nhận các tính năng thực tế đã được xây dựng vượt ra ngoài phạm vi ban đầu, phát sinh trong quá trình phát triển sau phases 1–4.
+
+### Backend — Endpoints bổ sung
+
+- [x] `GET /api/stream/video/alerts` — Trả về danh sách `VIDEO_ALERTS` tích lũy trong bộ nhớ cho một `video_id`; được frontend poll mỗi 1 giây
+- [x] `GET /api/video/file/{video_id}` — Phục vụ file video gốc đã upload để trình duyệt có thể seek; validate `video_id` bằng regex `[0-9a-f]{32}` chống glob injection
+- [x] `POST /api/live/start` + `GET /api/live/stream` — Đăng ký URL live camera và stream MJPEG; lưu trong dict `LIVE_STREAMS`
+- [x] `POST /api/detect_video` — Phân tích video offline (không stream), trả về `VideoDetectResponse` với số lượng sự kiện và danh sách `HistoryEvent`
+- [x] `GET /api/history/latest` — Trả về sự kiện history gần nhất, hỗ trợ filter `source` và `types`
+- [x] `GET /api/history/{event_id}` — Trả về một sự kiện history theo ID
+- [x] `GET /api/update/candidates`, `GET /api/update/auto-label/{event_id}`, `POST /api/update/mark`, `POST /api/update/start`, `GET /api/update/status` — 5 update endpoints (PLAN.md chỉ ghi 1 endpoint `POST /api/update/review`)
+
+### Backend — Logic xử lý bổ sung
+
+- [x] `_ViolationTracker` (trong `streaming.py`) — Xác nhận vi phạm qua rolling-window N-of-M (`_WINDOW_SIZE=5`, `_MIN_HITS=3`), grace period (`_TRACK_PATIENCE=3`), và IoU spatial fallback khi ByteTrack không gán được ID
+- [x] `VIDEO_ALERTS` dict trong bộ nhớ — Tích lũy alert có trường `id`, `timestamp_sec`, `class_name`, `confidence`, `crop` (base64), `x1/y1/x2/y2`; reset khi video được stream lại
+- [x] `INFERENCE_FRAME_INTERVAL = 30` — Chỉ chạy inference trên 1/30 frame thô để giảm tải CPU/GPU
+- [x] `src/core/bytetrack_video.yaml` — Config ByteTrack tùy chỉnh cho sparse video inference
+
+### Frontend — Components bổ sung
+
+- [x] `frontend/src/components/AlertDetailModal.tsx` — Modal video player với: seek đến timestamp của alert, canvas bbox overlay (HiDPI-aware, glow + label), progress bar tùy chỉnh, đóng bằng Escape hoặc click backdrop
+- [x] `frontend/src/types.ts` — Type `VideoAlert` mới (thay thế file `types.ts` cũ đã xoá; không nên nhầm với file cũ)
+- [x] Video pause/freeze-frame trong `VideoTracking.tsx` — Click vào stream MJPEG để pause; chụp canvas snapshot từ `<img>` tag để hiển thị khi paused
+- [x] `HistorySidebar.tsx` — Đã xoá; thiết kế cũ dùng polling liên tục, thay bằng inline alerts section trong `VideoTracking` (chỉ hiển thị khi phát hiện vi phạm)
+
+### Frontend — Tính năng bổ sung trong components hiện có
+
+- [x] `VideoTracking.tsx` — Violation alerts section (grid 2 cột) hiển thị alert từ polling; click card mở `AlertDetailModal`
+- [x] `ImageDetection.tsx` — Bbox opacity slider (0–100%); click detection card → scroll đến ảnh + highlight bbox 2.5s
+- [x] `services/api.ts` — Hàm `toApiAssetUrl()` để resolve URL asset tương đối/tuyệt đối ngoài `API_BASE`
+
+---
+
+## Nợ kỹ thuật (Tech Debt) — Đã xử lý
+
+| Vấn đề | Giải pháp | Mức độ |
+|---|---|---|
+| ~~`print()` debug còn trong production code~~ | Thay bằng `logger.debug/info` trong `streaming.py` | Cao ✅ |
+| ~~`VIDEO_ALERTS` dict không giới hạn kích thước~~ | `OrderedDict` + `_MAX_VIDEO_IDS=50` + `_MAX_ALERTS_PER_VIDEO=200` | Trung bình ✅ |
+| ~~Files video trong `videos_dir` không bao giờ bị xoá~~ | Cleanup startup trong `lifespan` — xoá files cũ hơn 24h | Trung bình ✅ |
+| ~~`formatTime()` bị trùng lặp~~ | Extracted ra `frontend/src/utils/format.ts` | Thấp ✅ |
+| ~~`DELETE /api/history` chưa implement~~ | Thêm `delete_all_history()` vào core + `DELETE /api/history` route | Thấp ✅ |
+| ~~`HistorySidebar` dead code~~ | Xoá hoàn toàn — thiết kế cũ, đã thay bằng inline alerts trong `VideoTracking` | Thấp ✅ |
+| ~~`ImageDetection` gọi `/predict` thay vì `/api/detect/image`~~ | Đổi sang `/api/detect/image` + thêm `source` field | Thấp ✅ |
+
+---
+
 ## Summary of Current State
 
 | Area | Status |
 |---|---|
 | Backend infrastructure (`src/`) | Complete — all modules written |
-| FastAPI routes (4 routers) | Complete |
+| FastAPI routes (4 routers + extras) | Complete |
 | Frontend components | Complete |
 | Deployment files | Complete |
 | Integration testing | Pending |
 | Git commit | Pending (awaiting approval) |
+| Tech debt cleanup | Complete ✅ |
