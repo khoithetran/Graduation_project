@@ -10,15 +10,24 @@ import uuid
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from src.api.schemas import LiveStartResponse, UploadVideoResponse, VideoDetectResponse
+from src.api.schemas import (
+    LiveAlertOut,
+    LiveStartResponse,
+    UploadVideoResponse,
+    VideoDetectResponse,
+    WebcamFrameResponse,
+)
 from src.config.settings import get_settings
 from src.core.predictor import get_predictor
 from src.core.streaming import (
+    LIVE_ALERTS,
     LIVE_STREAMS,
     VIDEO_ALERTS,
+    WEBCAM_SESSIONS,
     analyze_uploaded_video,
     generate_live_stream,
     generate_processed_video_stream,
+    process_webcam_frame,
     register_live_stream,
     register_uploaded_video,
 )
@@ -135,3 +144,37 @@ def live_stream(live_id: str = Query(...)) -> StreamingResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return StreamingResponse(stream, media_type="multipart/x-mixed-replace; boundary=frame")
+
+
+@router.post("/api/live/webcam/frame", response_model=WebcamFrameResponse)
+async def live_webcam_frame(
+    file: UploadFile = File(...),
+    session_id: str = Form(...),
+) -> WebcamFrameResponse:
+    """Process a single webcam frame and return detections + any new violation alerts."""
+    predictor = get_predictor()
+    raw_bytes = await file.read()
+    result = process_webcam_frame(
+        frame_bytes=raw_bytes,
+        session_id=session_id,
+        predictor=predictor,
+    )
+    return WebcamFrameResponse(
+        detections=result["detections"],
+        alerts=result["alerts"],
+    )
+
+
+@router.get("/api/live/webcam/alerts")
+def live_webcam_alerts(session_id: str = Query(...)) -> list[dict]:
+    """Return all accumulated violation alerts for a webcam session."""
+    session = WEBCAM_SESSIONS.get(session_id)
+    if session is None:
+        return []
+    return session.alerts
+
+
+@router.get("/api/live/alerts/{live_id}")
+def live_stream_alerts(live_id: str) -> list[dict]:
+    """Return accumulated violation alerts for an IP camera live stream."""
+    return LIVE_ALERTS.get(live_id, [])
