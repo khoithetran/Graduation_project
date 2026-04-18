@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { API_BASE } from '../services/api';
+import { formatTime } from '../utils/format';
 import type { VideoAlert } from '../types';
 import { getColor } from './BBoxCanvas';
 
@@ -7,12 +8,6 @@ interface AlertDetailModalProps {
   alert: VideoAlert;
   videoId: string;
   onClose: () => void;
-}
-
-function formatTime(sec: number): string {
-  const m = Math.floor(sec / 60).toString().padStart(2, '0');
-  const s = (sec % 60).toFixed(1).padStart(4, '0');
-  return `${m}:${s}`;
 }
 
 function drawBbox(

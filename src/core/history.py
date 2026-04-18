@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import logging
 from pathlib import Path
+import shutil
 import uuid
 
 from PIL import Image
@@ -156,6 +157,15 @@ def persist_window_event(
     )
     append_history_record(history_record)
     return history_record
+
+
+def delete_all_history() -> None:
+    """Remove all history events and their associated image files."""
+    for image_dir in (settings.history_global_dir, settings.history_crops_dir):
+        shutil.rmtree(image_dir, ignore_errors=True)
+        image_dir.mkdir(parents=True, exist_ok=True)
+    settings.history_jsonl.unlink(missing_ok=True)
+    logger.info("All history events and images have been deleted.")
 
 
 def resolve_history_image_path(image_reference: str) -> Path:

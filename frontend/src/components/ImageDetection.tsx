@@ -65,10 +65,11 @@ export function ImageDetection() {
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch(`${API_BASE}/predict`, { method: 'POST', body: form });
+      form.append('source', file.name);
+      const res = await fetch(`${API_BASE}/api/detect/image`, { method: 'POST', body: form });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const payload = (await res.json()) as { detections: Detection[] };
-      setDetections(payload.detections);
+      const payload = (await res.json()) as { boxes: Detection[] };
+      setDetections(payload.boxes);
       setStatusMessage(
         payload.detections.length > 0
           ? `${appText.upload.successFoundPrefix} ${payload.detections.length} ${appText.upload.successFoundSuffix}`

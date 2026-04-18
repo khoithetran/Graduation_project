@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from collections import deque
+from collections import deque, OrderedDict
 from dataclasses import dataclass, field
 import logging
 from pathlib import Path
@@ -31,6 +31,10 @@ _VIDEO_TRACKER_CFG = str(Path(__file__).parent / "bytetrack_video.yaml")
 # Minimum IoU to associate a no-ID detection with an existing tracked object
 _IOU_MATCH_THRESH = 0.30
 
+# Memory caps for VIDEO_ALERTS
+_MAX_VIDEO_IDS = 50       # max number of video sessions tracked simultaneously
+_MAX_ALERTS_PER_VIDEO = 200  # max alerts stored per video session
+
 
 def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     """Intersection-over-Union for two (x1, y1, x2, y2) boxes."""
@@ -43,8 +47,24 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     area_b = (b[2] - b[0]) * (b[3] - b[1])
     return inter / (area_a + area_b - inter)
 
-# Keyed by video_id → list of violation alert dicts accumulated during streaming
-VIDEO_ALERTS: dict[str, list[dict]] = {}
+# Keyed by video_id → list of violation alert dicts accumulated during streaming.
+# Bounded OrderedDict: evicts the oldest entry when _MAX_VIDEO_IDS is reached.
+VIDEO_ALERTS: OrderedDict[str, list[dict]] = OrderedDict()
+
+
+def _reset_video_alerts(video_id: str) -> None:
+    """Reset the alerts list for a video, evicting the oldest session if at capacity."""
+    if len(VIDEO_ALERTS) >= _MAX_VIDEO_IDS and video_id not in VIDEO_ALERTS:
+        VIDEO_ALERTS.popitem(last=False)
+    VIDEO_ALERTS[video_id] = []
+    VIDEO_ALERTS.move_to_end(video_id)
+
+
+def _append_video_alert(video_id: str, alert: dict) -> None:
+    """Append an alert for a video, respecting the per-video cap."""
+    alerts = VIDEO_ALERTS.setdefault(video_id, [])
+    if len(alerts) < _MAX_ALERTS_PER_VIDEO:
+        alerts.append(alert)
 
 # Run YOLO inference on 1 out of every N raw frames
 INFERENCE_FRAME_INTERVAL = 30
@@ -317,7 +337,7 @@ def generate_processed_video_stream(
     target_dt = 1.0 / target_fps
 
     # Reset alerts and confirmation state for this video_id on each (re)stream
-    VIDEO_ALERTS[video_id] = []
+    _reset_video_alerts(video_id)
     violation_tracker = _ViolationTracker()
 
     try:
@@ -385,22 +405,20 @@ def generate_processed_video_stream(
                             )
                             violation_hit_ids.add(resolved_id)
                             window = violation_tracker.history.get(resolved_id)
-                            print(
-                                f"[TRACK] frame={processed_idx} class={class_name} "
-                                f"bt_id={raw_bt_id} resolved_id={resolved_id} "
-                                f"window={list(window) if window else []} "
-                                f"sum={sum(window) if window else 0}",
-                                flush=True,
+                            logger.debug(
+                                "[TRACK] frame=%d class=%s bt_id=%s resolved_id=%d window=%s sum=%d",
+                                processed_idx, class_name, raw_bt_id, resolved_id,
+                                list(window) if window else [],
+                                sum(window) if window else 0,
                             )
                             if violation_tracker.record_hit(resolved_id):
-                                print(
-                                    f"\n!!! ALERT TRIGGERED FOR ID {resolved_id} "
-                                    f"class={class_name} t={round(timestamp_sec, 2)}s !!!\n",
-                                    flush=True,
+                                logger.info(
+                                    "Alert triggered: resolved_id=%d class=%s t=%.2fs",
+                                    resolved_id, class_name, timestamp_sec,
                                 )
                                 crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
                                 if crop_data:
-                                    VIDEO_ALERTS[video_id].append({
+                                    _append_video_alert(video_id, {
                                         "id": uuid.uuid4().hex,
                                         "timestamp_sec": round(timestamp_sec, 2),
                                         "class_name": class_name,
@@ -411,10 +429,9 @@ def generate_processed_video_stream(
                                         "x2": x2_i,
                                         "y2": y2_i,
                                     })
-                                    print(
-                                        f"[ALERT STORED] video_id={video_id} "
-                                        f"total_alerts={len(VIDEO_ALERTS[video_id])}",
-                                        flush=True,
+                                    logger.debug(
+                                        "Alert stored: video_id=%s total=%d",
+                                        video_id, len(VIDEO_ALERTS.get(video_id, [])),
                                     )
                         draw_detection(
                             frame,
