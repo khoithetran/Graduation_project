@@ -51,7 +51,7 @@ def download_simple_pdf(alerts: list[SimpleAlertItem]) -> FileResponse:
 
     build_simple_pdf(alerts=alerts, output_path=output_path)
 
-    filename = f"danh_sach_nghi_ngo_vi_pham_an_toan_lao_dong_{datetime.now().strftime('%H-%M_%d-%m-%Y')}.pdf"
+    filename = f"Danh-sach-nghi-ngo-vi-pham-ATLD_{datetime.now().strftime('%H:%M_%d-%m-%Y')}.pdf"
     return FileResponse(path=str(output_path), media_type="application/pdf", filename=filename)
 
 
