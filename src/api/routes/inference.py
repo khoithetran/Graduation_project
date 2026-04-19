@@ -3,8 +3,8 @@
 import logging
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from src.api.rate_limit import limiter
 
+from src.api.rate_limit import limiter
 from src.api.schemas import DetectImageResponse, HealthResponse, PredictResponse
 from src.config.settings import get_settings
 from src.core.history import persist_image_event

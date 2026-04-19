@@ -35,3 +35,9 @@ def test_predict_is_rate_limited():
     assert hasattr(predict, "__wrapped__"), (
         "/predict must be decorated with @limiter.limit — it lacks __wrapped__"
     )
+
+
+def test_stream_endpoints_are_rate_limited():
+    from src.api.routes.stream import detect_video, live_webcam_frame
+    assert hasattr(detect_video, "__wrapped__"), "/api/detect_video must be rate-limited"
+    assert hasattr(live_webcam_frame, "__wrapped__"), "/api/live/webcam/frame must be rate-limited"
