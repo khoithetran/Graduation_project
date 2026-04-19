@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 def _parse_csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     """Parse a comma-separated environment variable into a tuple."""
