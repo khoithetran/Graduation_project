@@ -4,6 +4,7 @@ import appText from '../content/app-text.vi.json';
 import { API_BASE } from '../services/api';
 import type { LiveAlert } from '../types';
 import { getColor } from './BBoxCanvas';
+import { ReportModal } from './ReportModal';
 
 type Mode = 'idle' | 'webcam' | 'ipcam';
 
@@ -20,6 +21,8 @@ function drawBboxes(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
   detections: FrameDetection[],
+  sendW: number,
+  sendH: number,
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx || !video.videoWidth || !video.videoHeight) return;
@@ -30,6 +33,10 @@ function drawBboxes(
   canvas.style.width = `${video.clientWidth}px`;
   canvas.style.height = `${video.clientHeight}px`;
 
+  // Bboxes are in sendW×sendH space — scale back to native video size first
+  const toNativeX = video.videoWidth / sendW;
+  const toNativeY = video.videoHeight / sendH;
+
   const scaleX = video.clientWidth / video.videoWidth;
   const scaleY = video.clientHeight / video.videoHeight;
   const s = Math.min(scaleX, scaleY) * dpr;
@@ -39,10 +46,10 @@ function drawBboxes(
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   for (const det of detections) {
-    const sx = det.x1 * s + offsetX;
-    const sy = det.y1 * s + offsetY;
-    const sw = (det.x2 - det.x1) * s;
-    const sh = (det.y2 - det.y1) * s;
+    const sx = det.x1 * toNativeX * s + offsetX;
+    const sy = det.y1 * toNativeY * s + offsetY;
+    const sw = (det.x2 - det.x1) * toNativeX * s;
+    const sh = (det.y2 - det.y1) * toNativeY * s;
     const color = getColor(det.class_name);
 
     ctx.strokeStyle = color;
@@ -69,6 +76,7 @@ export function LiveStream() {
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [alerts, setAlerts] = useState<LiveAlert[]>([]);
+  const [reportAlert, setReportAlert] = useState<LiveAlert | null>(null);
   const [urlInput, setUrlInput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -82,8 +90,10 @@ export function LiveStream() {
     if (mode !== 'webcam') return;
 
     let cancelled = false;
-    let intervalId: number | undefined;
+    // Off-screen canvas for resizing frames before upload
     const captureCanvas = document.createElement('canvas');
+    // Max width sent to backend — smaller = faster inference
+    const MAX_SEND_W = 640;
 
     const start = async () => {
       try {
@@ -98,18 +108,28 @@ export function LiveStream() {
         video.srcObject = stream;
         await video.play();
 
-        intervalId = window.setInterval(async () => {
+        // Continuous loop: capture → infer → draw → repeat immediately.
+        // Only 1 request in-flight at a time → no backpressure, minimal lag.
+        const loop = async () => {
+          if (cancelled) return;
           const v = videoRef.current;
-          if (!v || !v.videoWidth) return;
+          if (!v || !v.videoWidth) {
+            setTimeout(loop, 50);
+            return;
+          }
 
-          captureCanvas.width = v.videoWidth;
-          captureCanvas.height = v.videoHeight;
-          captureCanvas.getContext('2d')!.drawImage(v, 0, 0);
+          // Resize to MAX_SEND_W (keep aspect ratio) — reduces transfer + inference time
+          const scale = Math.min(1, MAX_SEND_W / v.videoWidth);
+          const sendW = Math.round(v.videoWidth * scale);
+          const sendH = Math.round(v.videoHeight * scale);
+          captureCanvas.width = sendW;
+          captureCanvas.height = sendH;
+          captureCanvas.getContext('2d')!.drawImage(v, 0, 0, sendW, sendH);
 
           const blob = await new Promise<Blob | null>((res) =>
-            captureCanvas.toBlob(res, 'image/jpeg', 0.8),
+            captureCanvas.toBlob(res, 'image/jpeg', 0.75),
           );
-          if (!blob || cancelled) return;
+          if (!blob || cancelled) { loop(); return; }
 
           const form = new FormData();
           form.append('file', blob, 'frame.jpg');
@@ -123,23 +143,26 @@ export function LiveStream() {
             if (cancelled) return;
             if (!res.ok) {
               console.error('Webcam frame error:', res.status, await res.text());
-              return;
-            }
-            const data = (await res.json()) as {
-              detections: FrameDetection[];
-              alerts: LiveAlert[];
-            };
-
-            if (overlayRef.current && videoRef.current) {
-              drawBboxes(overlayRef.current, videoRef.current, data.detections);
-            }
-            if (data.alerts.length > 0) {
-              setAlerts((prev) => [...data.alerts, ...prev].slice(0, 50));
+            } else {
+              const data = (await res.json()) as {
+                detections: FrameDetection[];
+                alerts: LiveAlert[];
+              };
+              if (overlayRef.current && videoRef.current) {
+                drawBboxes(overlayRef.current, videoRef.current, data.detections, sendW, sendH);
+              }
+              if (data.alerts.length > 0) {
+                setAlerts((prev) => [...data.alerts, ...prev].slice(0, 50));
+              }
             }
           } catch (err) {
             console.error('Webcam frame fetch failed:', err);
           }
-        }, 150);
+
+          loop();
+        };
+
+        loop();
       } catch {
         if (!cancelled) {
           setErrorMessage(appText.liveStream.webcamError);
@@ -152,7 +175,6 @@ export function LiveStream() {
 
     return () => {
       cancelled = true;
-      if (intervalId !== undefined) clearInterval(intervalId);
       // Use activeStreamRef — guaranteed non-null even after <video> is removed from DOM
       if (activeStreamRef.current) {
         activeStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -370,6 +392,17 @@ export function LiveStream() {
         </div>
       )}
 
+      {reportAlert && (
+        <ReportModal
+          alertId={reportAlert.id}
+          className={reportAlert.class_name}
+          timestamp={reportAlert.wall_time}
+          source="Live Stream"
+          cropDataUrl={reportAlert.crop}
+          onClose={() => setReportAlert(null)}
+        />
+      )}
+
       {/* Violation alerts */}
       {alerts.length > 0 && (
         <section className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5">
@@ -408,9 +441,17 @@ export function LiveStream() {
                         {(alert.confidence * 100).toFixed(1)}%
                       </p>
                     </div>
-                    <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-stone-200">
-                      {alert.wall_time}
-                    </span>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-stone-200">
+                        {alert.wall_time}
+                      </span>
+                      <button
+                        onClick={() => setReportAlert(alert)}
+                        className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs text-amber-200 transition hover:bg-amber-400/20"
+                      >
+                        {appText.report.viewReport}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

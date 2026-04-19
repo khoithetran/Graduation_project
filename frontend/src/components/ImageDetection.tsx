@@ -71,8 +71,8 @@ export function ImageDetection() {
       const payload = (await res.json()) as { boxes: Detection[] };
       setDetections(payload.boxes);
       setStatusMessage(
-        payload.detections.length > 0
-          ? `${appText.upload.successFoundPrefix} ${payload.detections.length} ${appText.upload.successFoundSuffix}`
+        payload.boxes.length > 0
+          ? `${appText.upload.successFoundPrefix} ${payload.boxes.length} ${appText.upload.successFoundSuffix}`
           : appText.upload.successEmpty,
       );
     } catch {
