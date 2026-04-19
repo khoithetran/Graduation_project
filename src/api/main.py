@@ -68,6 +68,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
+    expose_headers=["Content-Disposition"],
 )
 
 # ── Runtime data (history images, uploaded videos) ───────────────────────────
