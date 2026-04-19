@@ -12,6 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from src.api.rate_limit import limiter
 from src.api.routes.history import router as history_router
 from src.api.routes.inference import router as inference_router
 from src.api.routes.report import router as report_router
@@ -61,6 +65,9 @@ app = FastAPI(
     version=settings.app_version,
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
