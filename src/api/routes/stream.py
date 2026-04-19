@@ -6,9 +6,9 @@ from pathlib import Path
 import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from src.api.rate_limit import limiter
 from fastapi.responses import FileResponse, StreamingResponse
 
+from src.api.rate_limit import limiter
 from src.api.schemas import (
     LiveAlertOut,
     LiveStartResponse,
@@ -148,7 +148,7 @@ def live_stream(live_id: str = Query(...)) -> StreamingResponse:
 
 
 @router.post("/api/live/webcam/frame", response_model=WebcamFrameResponse)
-@limiter.limit("300/minute")
+@limiter.limit("600/minute")
 async def live_webcam_frame(
     request: Request,
     file: UploadFile = File(...),
