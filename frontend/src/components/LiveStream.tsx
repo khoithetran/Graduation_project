@@ -272,10 +272,13 @@ export function LiveStream() {
       });
       if (!res.ok) { alert('Không thể tạo PDF.'); return; }
       const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition') ?? '';
+      const match = disposition.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : 'bao_cao.pdf';
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `vi_pham_live_${Date.now()}.pdf`;
+      a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
     } finally {
