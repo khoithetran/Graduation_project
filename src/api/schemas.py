@@ -163,3 +163,62 @@ class UpdateStatusResponse(BaseModel):
     num_images: int
     threshold: int
     ready: bool
+
+
+class WebcamDetectionOut(BaseModel):
+    """Single detection box returned per webcam frame."""
+
+    class_name: str
+    confidence: float
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+
+class LiveAlertOut(BaseModel):
+    """Violation alert from a live stream (webcam or IP camera)."""
+
+    id: str
+    wall_time: str
+    class_name: str
+    confidence: float
+    crop: str
+
+
+class WebcamFrameResponse(BaseModel):
+    """Response for a single processed webcam frame."""
+
+    detections: list[WebcamDetectionOut]
+    alerts: list[LiveAlertOut]
+
+
+class AlertReportRequest(BaseModel):
+    """Request payload for generating a report directly from an alert."""
+
+    class_name: str
+    timestamp: str
+    source: str
+    num_violators: int = 1
+    crop_base64: Optional[str] = None
+
+
+class EventReport(BaseModel):
+    """LLM-generated violation report for one event or alert."""
+
+    event_id: str
+    description: str
+    risk_level: str  # "THẤP" | "TRUNG BÌNH" | "CAO" | "NGHIÊM TRỌNG"
+    recommendations: list[str]
+    generated_at: str
+    status: str  # "ready" | "failed"
+
+
+class SimpleAlertItem(BaseModel):
+    """Minimal alert data sent from frontend for instant PDF generation."""
+
+    id: str
+    timestamp: str
+    class_name: str
+    confidence: float
+    crop_base64: Optional[str] = None  # base64 without data: prefix

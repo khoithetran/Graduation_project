@@ -3,8 +3,15 @@ import { useState } from 'react';
 import appText from './content/app-text.vi.json';
 import { ImageDetection } from './components/ImageDetection';
 import { VideoTracking } from './components/VideoTracking';
+import { LiveStream } from './components/LiveStream';
 
-type Tab = 'image' | 'video';
+type Tab = 'image' | 'video' | 'live';
+
+const TAB_LABELS: Record<Tab, string> = {
+  image: appText.tabs.imageDetection,
+  video: appText.tabs.videoTracking,
+  live: appText.tabs.liveStream,
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('image');
@@ -12,7 +19,6 @@ function App() {
   return (
     <div className="min-h-screen bg-app-pattern text-stone-100">
       <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-4 py-6 lg:px-8">
-        {/* Main content */}
         <main className="flex-1 rounded-[2rem] border border-white/10 bg-stone-950/70 p-5 shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur xl:p-7">
           {/* Header */}
           <div className="mb-6 border-b border-white/10 pb-5">
@@ -30,7 +36,7 @@ function App() {
 
           {/* Tab bar */}
           <div className="mb-6 flex gap-2 rounded-2xl border border-white/10 bg-white/5 p-1">
-            {(['image', 'video'] as const).map((tab) => (
+            {(['image', 'video', 'live'] as const).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -40,13 +46,15 @@ function App() {
                     : 'text-stone-400 hover:text-stone-200'
                 }`}
               >
-                {tab === 'image' ? appText.tabs.imageDetection : appText.tabs.videoTracking}
+                {TAB_LABELS[tab]}
               </button>
             ))}
           </div>
 
-          {/* Active tab content */}
-          {activeTab === 'image' ? <ImageDetection /> : <VideoTracking />}
+          {/* Active tab */}
+          {activeTab === 'image' && <ImageDetection />}
+          {activeTab === 'video' && <VideoTracking />}
+          {activeTab === 'live' && <LiveStream />}
         </main>
       </div>
     </div>

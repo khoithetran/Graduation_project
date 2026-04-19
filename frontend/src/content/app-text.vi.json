@@ -54,7 +54,8 @@
   },
   "tabs": {
     "imageDetection": "Nhận diện Ảnh",
-    "videoTracking": "Theo dõi Video"
+    "videoTracking": "Theo dõi Video",
+    "liveStream": "Luồng Trực tiếp"
   },
   "videoTracking": {
     "sectionTitle": "Theo dõi đối tượng qua video",
@@ -66,5 +67,25 @@
   },
   "bboxControls": {
     "opacityLabel": "Độ mờ hộp nhận diện"
+  },
+  "liveStream": {
+    "sectionTitle": "Luồng Trực tiếp",
+    "webcamLabel": "Webcam",
+    "webcamHint": "Demo nhanh — không cần thiết bị ngoài",
+    "webcamConnecting": "Đang kết nối webcam...",
+    "webcamError": "Không thể truy cập webcam. Hãy kiểm tra quyền truy cập camera.",
+    "ipcamLabel": "IP Camera / Điện thoại",
+    "ipcamHint": "Cùng mạng WiFi với server",
+    "ipcamStreaming": "Đang nhận luồng từ camera...",
+    "ipcamError": "Không thể kết nối. Kiểm tra URL và đảm bảo cùng mạng WiFi.",
+    "urlPlaceholder": "rtsp://... hoặc http://192.168.x.x:8080/video",
+    "connectButton": "Kết nối",
+    "phoneGuide": "Android: IP Webcam (miễn phí) · iOS: Camo hoặc IP Camera (không cần driver PC) · Cần cùng mạng WiFi với server",
+    "alertsTitle": "Vi phạm phát hiện",
+    "alertsSuffix": "vi phạm"
+  },
+  "report": {
+    "viewReport": "Xem báo cáo",
+    "downloadPdf": "Tải PDF"
   }
 }
