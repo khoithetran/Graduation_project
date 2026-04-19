@@ -13,7 +13,7 @@ pinned: false
 
 **A full-stack AI production system for real-time PPE compliance monitoring**
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-Hugging%20Face%20Spaces-FFD21E?style=for-the-badge)](https://huggingface.co/spaces/letsgobae/safety-helmet-detection)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Hugging%20Face%20Spaces-FFD21E?style=for-the-badge)](https://huggingface.co/spaces/tr-th-khoi/safety-helmet-detection)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com)
@@ -27,7 +27,7 @@ pinned: false
 
 > Try it now — no setup required.
 
-**[letsgobae/safety-helmet-detection on Hugging Face Spaces](https://huggingface.co/spaces/letsgobae/safety-helmet-detection)**
+**[tr-th-khoi/safety-helmet-detection on Hugging Face Spaces](https://huggingface.co/spaces/tr-th-khoi/safety-helmet-detection)**
 
 ---
 
@@ -124,7 +124,7 @@ Real-time ByteTrack tracking demonstration:
 
 [`demo/video_demo.mp4`](demo/video_demo.mp4)
 
-> GitHub and Hugging Face Spaces do not autoplay MP4 files in the README. Click the link above to download or preview. Alternatively, upload any construction site video directly in the [live demo](https://huggingface.co/spaces/letsgobae/safety-helmet-detection).
+> GitHub and Hugging Face Spaces do not autoplay MP4 files in the README. Click the link above to download or preview. Alternatively, upload any construction site video directly in the [live demo](https://huggingface.co/spaces/tr-th-khoi/safety-helmet-detection).
 
 ---
 
@@ -172,7 +172,7 @@ Real-time ByteTrack tracking demonstration:
 ### Recommended — Docker
 
 ```bash
-git clone https://huggingface.co/spaces/letsgobae/safety-helmet-detection
+git clone https://huggingface.co/spaces/tr-th-khoi/safety-helmet-detection
 cd safety-helmet-detection
 cp .env.example .env   # add GEMINI_API_KEY for AI reports (optional)
 docker compose up --build
@@ -209,6 +209,14 @@ VITE_API_BASE=http://localhost:8000
 ---
 
 ## API Reference
+
+Rate limits are enforced per IP address (no API key required):
+
+| Endpoint | Limit |
+|----------|-------|
+| `POST /predict` | 30 req/min |
+| `POST /api/detect_video` | 5 req/min |
+| `POST /api/live/webcam/frame` | 600 req/min |
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
