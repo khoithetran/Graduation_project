@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import io
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +22,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from src.api.schemas import EventReport, HistoryEvent
+from src.api.schemas import EventReport, HistoryEvent, SimpleAlertItem
 from src.core.history import resolve_history_image_path
 
 _FONT_CANDIDATES = [
@@ -120,6 +122,49 @@ def build_pdf(
                     story.append(RLImage(str(img_path), width=4 * cm, height=4 * cm))
             except Exception:
                 pass
+
+        story.append(Spacer(1, 0.3 * cm))
+
+    doc.build(story)
+
+
+def build_simple_pdf(alerts: list[SimpleAlertItem], output_path: Path) -> None:
+    """Build a lightweight PDF from raw alert data — no LLM, no history required."""
+    font = _register_vn_font()
+
+    title_style = ParagraphStyle("T", fontName=font, fontSize=16, spaceAfter=8, alignment=1, textColor=colors.darkblue)
+    sub_style = ParagraphStyle("S", fontName=font, fontSize=10, spaceAfter=4, textColor=colors.grey)
+    h2_style = ParagraphStyle("H2", fontName=font, fontSize=11, spaceAfter=4, textColor=colors.darkblue, spaceBefore=8)
+    body_style = ParagraphStyle("B", fontName=font, fontSize=10, spaceAfter=3)
+
+    doc = SimpleDocTemplate(
+        str(output_path), pagesize=A4,
+        leftMargin=2 * cm, rightMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+    )
+
+    story = []
+    story.append(Paragraph("BAO CAO VI PHAM AN TOAN LAO DONG", title_style))
+    story.append(Paragraph(f"Thoi diem tao: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", sub_style))
+    story.append(Paragraph(f"Tong so vi pham: {len(alerts)}", sub_style))
+    story.append(Spacer(1, 0.4 * cm))
+
+    for i, alert in enumerate(alerts, 1):
+        conf_pct = f"{alert.confidence * 100:.1f}%"
+        story.append(Paragraph(f"#{i}. {alert.class_name} ({conf_pct}) - {alert.timestamp}", h2_style))
+
+        if alert.crop_base64:
+            try:
+                raw = alert.crop_base64
+                if "," in raw:
+                    raw = raw.split(",", 1)[1]
+                img_bytes = base64.b64decode(raw)
+                img_stream = io.BytesIO(img_bytes)
+                story.append(RLImage(img_stream, width=5 * cm, height=5 * cm))
+            except Exception:
+                story.append(Paragraph("(Khong co anh)", body_style))
+        else:
+            story.append(Paragraph("(Khong co anh)", body_style))
 
         story.append(Spacer(1, 0.3 * cm))
 

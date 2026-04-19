@@ -18,6 +18,7 @@ export function VideoTracking() {
   const [alerts, setAlerts] = useState<VideoAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<VideoAlert | null>(null);
   const [reportAlert, setReportAlert] = useState<VideoAlert | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -129,6 +130,35 @@ export function VideoTracking() {
     setSelectedAlert(alert);
   };
 
+  const handleDownloadPdf = async () => {
+    if (!alerts.length) return;
+    setIsDownloadingPdf(true);
+    try {
+      const body = alerts.map((a) => ({
+        id: a.id,
+        timestamp: new Date(a.timestamp_sec * 1000).toLocaleString('vi-VN'),
+        class_name: a.class_name,
+        confidence: a.confidence,
+        crop_base64: a.crop?.startsWith('data:') ? a.crop.split(',')[1] : a.crop,
+      }));
+      const res = await fetch(`${API_BASE}/api/report/simple-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { alert('Không thể tạo PDF.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vi_pham_video_${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Status bar */}
@@ -220,9 +250,18 @@ export function VideoTracking() {
         <section className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">Violation Alerts</h2>
-            <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs text-red-300">
-              {alerts.length} detected
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs text-red-300">
+                {alerts.length} detected
+              </span>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={isDownloadingPdf}
+                className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs text-amber-200 transition hover:bg-amber-400/20 disabled:opacity-40"
+              >
+                {isDownloadingPdf ? '...' : appText.report.downloadPdf}
+              </button>
+            </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {alerts.map((alert) => {

@@ -212,3 +212,13 @@ class EventReport(BaseModel):
     recommendations: list[str]
     generated_at: str
     status: str  # "ready" | "failed"
+
+
+class SimpleAlertItem(BaseModel):
+    """Minimal alert data sent from frontend for instant PDF generation."""
+
+    id: str
+    timestamp: str
+    class_name: str
+    confidence: float
+    crop_base64: Optional[str] = None  # base64 without data: prefix
