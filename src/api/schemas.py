@@ -191,3 +191,24 @@ class WebcamFrameResponse(BaseModel):
 
     detections: list[WebcamDetectionOut]
     alerts: list[LiveAlertOut]
+
+
+class AlertReportRequest(BaseModel):
+    """Request payload for generating a report directly from an alert."""
+
+    class_name: str
+    timestamp: str
+    source: str
+    num_violators: int = 1
+    crop_base64: Optional[str] = None
+
+
+class EventReport(BaseModel):
+    """LLM-generated violation report for one event or alert."""
+
+    event_id: str
+    description: str
+    risk_level: str  # "THẤP" | "TRUNG BÌNH" | "CAO" | "NGHIÊM TRỌNG"
+    recommendations: list[str]
+    generated_at: str
+    status: str  # "ready" | "failed"
