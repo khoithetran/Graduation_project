@@ -7,6 +7,10 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 def _parse_csv_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     """Parse a comma-separated environment variable into a tuple."""
@@ -116,6 +120,21 @@ class Settings:
         return self.update_pool_dir / "accepted.jsonl"
 
     @property
+    def gemini_api_key(self) -> str:
+        """Return the Gemini API key from environment."""
+        return os.getenv("GEMINI_API_KEY", "")
+
+    @property
+    def report_interval_hours(self) -> int:
+        """Return the scheduled report generation interval in hours."""
+        return int(os.getenv("REPORT_INTERVAL_HOURS", "4"))
+
+    @property
+    def reports_dir(self) -> Path:
+        """Return the directory for generated PDF reports."""
+        return self.data_dir / "reports"
+
+    @property
     def model_path(self) -> Path:
         """Resolve the configured model path."""
         configured = os.getenv("MODEL_PATH")
@@ -137,6 +156,7 @@ class Settings:
             self.update_pool_dir,
             self.update_pool_images_dir,
             self.update_pool_labels_dir,
+            self.reports_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
