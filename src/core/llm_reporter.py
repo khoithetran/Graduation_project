@@ -9,7 +9,6 @@ import logging
 from datetime import datetime
 
 from google import genai
-from google.genai import types as genai_types
 from PIL import Image
 
 from src.api.schemas import AlertReportRequest, EventReport, HistoryEvent
@@ -52,9 +51,7 @@ def _call_gemini(prompt: str, crop_image: Image.Image | None) -> dict:
 
     parts: list = [prompt]
     if crop_image is not None:
-        buf = io.BytesIO()
-        crop_image.save(buf, format="JPEG")
-        parts.append(genai_types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg"))
+        parts.append(crop_image)  # PIL.Image supported directly by google-genai SDK
 
     response = client.models.generate_content(
         model="gemini-2.0-flash",
