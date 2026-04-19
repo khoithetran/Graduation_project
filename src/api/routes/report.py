@@ -9,14 +9,14 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
-from src.api.schemas import AlertReportRequest, EventReport
+from src.api.schemas import AlertReportRequest, EventReport, SimpleAlertItem
 from src.core.history import load_all_history
 from src.core.llm_reporter import (
     bulk_generate_reports,
     generate_from_alert,
     get_or_generate_report_for_event,
 )
-from src.core.pdf_builder import build_pdf
+from src.core.pdf_builder import build_pdf, build_simple_pdf
 
 router = APIRouter(tags=["report"])
 
@@ -37,6 +37,22 @@ def report_for_event(event_id: str) -> EventReport:
     if report is None:
         raise HTTPException(status_code=404, detail="History event not found.")
     return report
+
+
+@router.post("/api/report/simple-pdf")
+def download_simple_pdf(alerts: list[SimpleAlertItem]) -> FileResponse:
+    """Generate and download a PDF from the current session's alert list (no LLM)."""
+    if not alerts:
+        raise HTTPException(status_code=400, detail="Danh sach vi pham trong.")
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    output_path = Path(tmp.name)
+    tmp.close()
+
+    build_simple_pdf(alerts=alerts, output_path=output_path)
+
+    filename = f"vi_pham_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+    return FileResponse(path=str(output_path), media_type="application/pdf", filename=filename)
 
 
 @router.get("/api/report/download")

@@ -77,6 +77,7 @@ export function LiveStream() {
   const [isConnecting, setIsConnecting] = useState(false);
   const [alerts, setAlerts] = useState<LiveAlert[]>([]);
   const [reportAlert, setReportAlert] = useState<LiveAlert | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [urlInput, setUrlInput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -253,6 +254,35 @@ export function LiveStream() {
     }
   };
 
+  const handleDownloadPdf = async () => {
+    if (!alerts.length) return;
+    setIsDownloadingPdf(true);
+    try {
+      const body = alerts.map((a) => ({
+        id: a.id,
+        timestamp: a.wall_time,
+        class_name: a.class_name,
+        confidence: a.confidence,
+        crop_base64: a.crop?.startsWith('data:') ? a.crop.split(',')[1] : a.crop,
+      }));
+      const res = await fetch(`${API_BASE}/api/report/simple-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { alert('Không thể tạo PDF.'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `vi_pham_live_${Date.now()}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
+
   const handleStop = () => {
     setMode('idle');
     setStreamUrl(null);
@@ -410,9 +440,18 @@ export function LiveStream() {
             <h2 className="text-lg font-semibold text-white">
               {appText.liveStream.alertsTitle}
             </h2>
-            <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs text-red-300">
-              {alerts.length} {appText.liveStream.alertsSuffix}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-red-500/20 px-3 py-1 text-xs text-red-300">
+                {alerts.length} {appText.liveStream.alertsSuffix}
+              </span>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={isDownloadingPdf}
+                className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs text-amber-200 transition hover:bg-amber-400/20 disabled:opacity-40"
+              >
+                {isDownloadingPdf ? '...' : appText.report.downloadPdf}
+              </button>
+            </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             {alerts.map((alert) => {
