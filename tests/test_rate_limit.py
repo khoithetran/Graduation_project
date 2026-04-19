@@ -12,3 +12,26 @@ def test_rate_limit_exception_handler_registered():
     assert RateLimitExceeded in app.exception_handlers, (
         "RateLimitExceeded handler must be registered so FastAPI returns 429"
     )
+
+
+import io
+from PIL import Image as PILImage
+from fastapi.testclient import TestClient
+
+
+def _fake_jpeg_bytes() -> bytes:
+    buf = io.BytesIO()
+    PILImage.new("RGB", (10, 10), color=(255, 0, 0)).save(buf, format="JPEG")
+    return buf.getvalue()
+
+
+def test_predict_is_rate_limited():
+    """Verify the /predict endpoint has a rate limit decorator active.
+
+    We test this by checking the endpoint function has been wrapped by slowapi
+    (i.e. it has a __wrapped__ attribute), which confirms @limiter.limit was applied.
+    """
+    from src.api.routes.inference import predict
+    assert hasattr(predict, "__wrapped__"), (
+        "/predict must be decorated with @limiter.limit — it lacks __wrapped__"
+    )

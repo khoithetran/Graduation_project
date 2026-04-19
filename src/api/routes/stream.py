@@ -1,13 +1,12 @@
 """Video and live stream endpoints."""
 
-from __future__ import annotations
-
 import logging
 import re
 from pathlib import Path
 import uuid
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from src.api.rate_limit import limiter
 from fastapi.responses import FileResponse, StreamingResponse
 
 from src.api.schemas import (
@@ -38,7 +37,9 @@ settings = get_settings()
 
 
 @router.post("/api/detect_video", response_model=VideoDetectResponse)
+@limiter.limit("5/minute")
 async def detect_video(
+    request: Request,
     file: UploadFile = File(...),
     source: str | None = Form(None),
 ) -> VideoDetectResponse:
@@ -147,7 +148,9 @@ def live_stream(live_id: str = Query(...)) -> StreamingResponse:
 
 
 @router.post("/api/live/webcam/frame", response_model=WebcamFrameResponse)
+@limiter.limit("300/minute")
 async def live_webcam_frame(
+    request: Request,
     file: UploadFile = File(...),
     session_id: str = Form(...),
 ) -> WebcamFrameResponse:

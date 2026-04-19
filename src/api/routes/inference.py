@@ -1,10 +1,9 @@
 """Inference and health endpoints."""
 
-from __future__ import annotations
-
 import logging
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from src.api.rate_limit import limiter
 
 from src.api.schemas import DetectImageResponse, HealthResponse, PredictResponse
 from src.config.settings import get_settings
@@ -33,7 +32,8 @@ def health_check() -> HealthResponse:
 
 
 @router.post("/predict", response_model=PredictResponse)
-async def predict(file: UploadFile = File(...)) -> PredictResponse:
+@limiter.limit("30/minute")
+async def predict(request: Request, file: UploadFile = File(...)) -> PredictResponse:
     """Run the production-ready predict endpoint required by the refactor."""
     predictor = get_predictor()
     if not predictor.is_loaded:
