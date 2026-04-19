@@ -6,6 +6,7 @@ import { formatTime } from '../utils/format';
 import type { VideoAlert } from '../types';
 import { getColor } from './BBoxCanvas';
 import { AlertDetailModal } from './AlertDetailModal';
+import { ReportModal } from './ReportModal';
 
 export function VideoTracking() {
   const [videoId, setVideoId] = useState<string | null>(null);
@@ -16,6 +17,7 @@ export function VideoTracking() {
   const [frozenFrame, setFrozenFrame] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<VideoAlert[]>([]);
   const [selectedAlert, setSelectedAlert] = useState<VideoAlert | null>(null);
+  const [reportAlert, setReportAlert] = useState<VideoAlert | null>(null);
 
   const imgRef = useRef<HTMLImageElement>(null);
 
@@ -255,13 +257,16 @@ export function VideoTracking() {
                         {(alert.confidence * 100).toFixed(1)}%
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="flex flex-col items-end gap-2">
                       <span className="rounded-full bg-white/10 px-3 py-1 font-mono text-xs text-stone-200">
                         {formatTime(alert.timestamp_sec)}
                       </span>
-                      <p className="mt-2 text-xs text-stone-500 group-hover:text-stone-400">
-                        Click to view ↗
-                      </p>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setReportAlert(alert); }}
+                        className="rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-xs text-amber-200 transition hover:bg-amber-400/20"
+                      >
+                        Xem báo cáo
+                      </button>
                     </div>
                   </div>
                 </button>
@@ -276,6 +281,17 @@ export function VideoTracking() {
           alert={selectedAlert}
           videoId={videoId}
           onClose={() => setSelectedAlert(null)}
+        />
+      )}
+
+      {reportAlert && (
+        <ReportModal
+          alertId={reportAlert.id}
+          className={reportAlert.class_name}
+          timestamp={new Date(reportAlert.timestamp_sec * 1000).toISOString()}
+          source="Video Upload"
+          cropDataUrl={reportAlert.crop}
+          onClose={() => setReportAlert(null)}
         />
       )}
     </div>

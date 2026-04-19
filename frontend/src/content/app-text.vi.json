@@ -83,5 +83,9 @@
     "phoneGuide": "Android: IP Webcam (miễn phí) · iOS: Camo hoặc IP Camera (không cần driver PC) · Cần cùng mạng WiFi với server",
     "alertsTitle": "Vi phạm phát hiện",
     "alertsSuffix": "vi phạm"
+  },
+  "report": {
+    "viewReport": "Xem báo cáo",
+    "downloadPdf": "Tải PDF"
   }
 }

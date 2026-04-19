@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import appText from './content/app-text.vi.json';
+import { API_BASE } from './services/api';
 import { ImageDetection } from './components/ImageDetection';
 import { VideoTracking } from './components/VideoTracking';
 import { LiveStream } from './components/LiveStream';
@@ -15,6 +16,30 @@ const TAB_LABELS: Record<Tab, string> = {
 
 function App() {
   const [activeTab, setActiveTab] = useState<Tab>('image');
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadPdf = async () => {
+    setIsDownloading(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/report/download?hours=4`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        alert(err.detail ?? 'Không thể tải PDF.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bao_cao_${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '_')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert('Không thể kết nối backend.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-app-pattern text-stone-100">
@@ -25,9 +50,18 @@ function App() {
             <p className="mb-2 inline-flex rounded-full border border-amber-400/30 bg-amber-300/10 px-3 py-1 text-xs uppercase tracking-[0.28em] text-amber-200">
               {appText.header.badge}
             </p>
-            <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">
-              {appText.header.title}
-            </h1>
+            <div className="flex items-start justify-between gap-4">
+              <h1 className="text-3xl font-semibold tracking-tight text-white md:text-4xl">
+                {appText.header.title}
+              </h1>
+              <button
+                onClick={handleDownloadPdf}
+                disabled={isDownloading}
+                className="flex-shrink-0 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2 text-sm font-semibold text-amber-200 transition hover:bg-amber-400/20 disabled:opacity-40"
+              >
+                {isDownloading ? '...' : appText.report.downloadPdf}
+              </button>
+            </div>
             <p className="mt-2 max-w-2xl text-sm text-stone-300">
               {appText.header.description.split('/predict')[0]}
               <span className="font-mono text-amber-200">/predict</span>.
