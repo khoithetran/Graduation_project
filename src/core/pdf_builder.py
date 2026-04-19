@@ -7,6 +7,8 @@ import io
 from datetime import datetime
 from pathlib import Path
 
+from PIL import Image as PILImage
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
@@ -128,6 +130,32 @@ def build_pdf(
     doc.build(story)
 
 
+_CLASS_LABEL: dict[str, str] = {
+    "head": "Nghi ngo khong doi mu bao ho",
+    "HEAD": "Nghi ngo khong doi mu bao ho",
+    "non-helmet": "Nghi ngo doi mu bao ho khong dat chuan",
+    "non_helmet": "Nghi ngo doi mu bao ho khong dat chuan",
+    "NO_HELMET": "Nghi ngo doi mu bao ho khong dat chuan",
+}
+
+_MAX_IMG_W = 10 * cm
+_MAX_IMG_H = 10 * cm
+
+
+def _rl_image_from_b64(raw_b64: str) -> RLImage | None:
+    """Decode base64 crop and return an RLImage preserving aspect ratio."""
+    try:
+        raw = raw_b64.split(",", 1)[1] if "," in raw_b64 else raw_b64
+        img_bytes = base64.b64decode(raw)
+        pil_img = PILImage.open(io.BytesIO(img_bytes))
+        w, h = pil_img.size
+        scale = min(_MAX_IMG_W / w, _MAX_IMG_H / h)
+        buf = io.BytesIO(img_bytes)
+        return RLImage(buf, width=w * scale, height=h * scale)
+    except Exception:
+        return None
+
+
 def build_simple_pdf(alerts: list[SimpleAlertItem], output_path: Path) -> None:
     """Build a lightweight PDF from raw alert data — no LLM, no history required."""
     font = _register_vn_font()
@@ -144,28 +172,26 @@ def build_simple_pdf(alerts: list[SimpleAlertItem], output_path: Path) -> None:
     )
 
     story = []
-    story.append(Paragraph("BAO CAO VI PHAM AN TOAN LAO DONG", title_style))
-    story.append(Paragraph(f"Thoi diem tao: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", sub_style))
-    story.append(Paragraph(f"Tong so vi pham: {len(alerts)}", sub_style))
+    story.append(Paragraph("DANH SACH NGHI NGO VI PHAM AN TOAN LAO DONG", title_style))
+    story.append(Paragraph(f"Thoi diem tao: {datetime.now().strftime('%H:%M %d/%m/%Y')}", sub_style))
+    story.append(Paragraph(f"Tong so truong hop: {len(alerts)}", sub_style))
     story.append(Spacer(1, 0.4 * cm))
 
     for i, alert in enumerate(alerts, 1):
+        label = _CLASS_LABEL.get(alert.class_name, alert.class_name)
         conf_pct = f"{alert.confidence * 100:.1f}%"
-        story.append(Paragraph(f"#{i}. {alert.class_name} ({conf_pct}) - {alert.timestamp}", h2_style))
+        story.append(Paragraph(f"#{i}. {label} ({conf_pct})", h2_style))
+        story.append(Paragraph(f"Thoi gian: {alert.timestamp}", body_style))
 
         if alert.crop_base64:
-            try:
-                raw = alert.crop_base64
-                if "," in raw:
-                    raw = raw.split(",", 1)[1]
-                img_bytes = base64.b64decode(raw)
-                img_stream = io.BytesIO(img_bytes)
-                story.append(RLImage(img_stream, width=5 * cm, height=5 * cm))
-            except Exception:
-                story.append(Paragraph("(Khong co anh)", body_style))
+            img = _rl_image_from_b64(alert.crop_base64)
+            if img:
+                story.append(img)
+            else:
+                story.append(Paragraph("(Khong the tai anh)", body_style))
         else:
             story.append(Paragraph("(Khong co anh)", body_style))
 
-        story.append(Spacer(1, 0.3 * cm))
+        story.append(Spacer(1, 0.4 * cm))
 
     doc.build(story)
