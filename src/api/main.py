@@ -14,11 +14,13 @@ from fastapi.staticfiles import StaticFiles
 
 from src.api.routes.history import router as history_router
 from src.api.routes.inference import router as inference_router
+from src.api.routes.report import router as report_router
 from src.api.routes.stream import router as stream_router
 from src.api.routes.update import router as update_router
 from src.config.logging import setup_logging
 from src.config.settings import get_settings
 from src.core.predictor import get_predictor
+from src.core.scheduler import start_scheduler, stop_scheduler
 
 settings = get_settings()
 setup_logging(settings.log_level)
@@ -49,7 +51,9 @@ async def lifespan(app: FastAPI):
         predictor.load_model()
     except Exception:
         logger.exception("Model preload failed; health endpoint will report model_loaded=false.")
+    start_scheduler()
     yield
+    stop_scheduler()
 
 
 app = FastAPI(
@@ -74,6 +78,7 @@ app.include_router(inference_router)
 app.include_router(history_router)
 app.include_router(stream_router)
 app.include_router(update_router)
+app.include_router(report_router)
 
 # ── React SPA — only mounted when the compiled build exists ──────────────────
 if _FRONTEND_DIST.exists():
