@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from threading import Lock
 from typing import ClassVar
 
@@ -41,6 +42,7 @@ class PersonDetector:
             return
         self.settings = settings or get_settings()
         self._model: YOLO | None = None
+        self._device: str | int = "cpu"
         self._model_lock = Lock()
         self._initialized = True
 
@@ -55,7 +57,8 @@ class PersonDetector:
             if self._model is not None and not force:
                 return
             path = self.settings.person_model_path
-            logger.info("Loading person detector from %s", path)
+            self._device = self._select_device(path)
+            logger.info("Loading person detector from %s on device %s", path, self._device)
             self._model = YOLO(str(path))
             logger.info("Person detector loaded (%s).", path)
 
@@ -78,7 +81,7 @@ class PersonDetector:
             conf=self.settings.person_confidence_threshold,
             classes=[_PERSON_CLASS_ID],
             verbose=False,
-            device="cpu",
+            device=self._device,
         )
         return self._extract_boxes(frame, results)
 
@@ -104,11 +107,39 @@ class PersonDetector:
             conf=self.settings.person_confidence_threshold,
             classes=[_PERSON_CLASS_ID],
             verbose=False,
-            device="cpu",
+            device=self._device,
         )
         return self._extract_tracked_boxes(frame, results)
 
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _select_device(self, model_path: Path) -> str | int:
+        """Choose the best available device for the person-detection model.
+
+        Mirrors Predictor._select_device.  ONNX models prefer CUDAExecutionProvider
+        when onnxruntime-gpu is installed; .pt models prefer torch CUDA; both fall
+        back to CPU.  ONNX_EXECUTION_PROVIDER env var overrides auto-detection.
+        """
+        suffix = model_path.suffix.lower()
+        if suffix == ".onnx":
+            override = self.settings.onnx_execution_provider
+            if override:
+                return "cpu" if "CPU" in override.upper() else 0
+            try:
+                import onnxruntime as ort
+                if "CUDAExecutionProvider" in ort.get_available_providers():
+                    return 0
+            except Exception:
+                logger.debug("ONNX Runtime provider check failed for person model; using CPU.", exc_info=True)
+            return "cpu"
+
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return 0
+        except Exception:
+            logger.debug("CUDA detection failed for person model; using CPU.", exc_info=True)
+        return "cpu"
 
     def _extract_boxes(
         self, frame: np.ndarray, results: list

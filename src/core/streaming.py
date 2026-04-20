@@ -458,11 +458,12 @@ def analyze_uploaded_video(
             window_nonhelmet.append(1 if frame_has_nonhelmet else 0)
             head_count = sum(window_head)
             nonhelmet_count = sum(window_nonhelmet)
-            pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
+            _pil_frame: Image.Image | None = None
             if prev_nonhelmet_count < settings.stream_event_threshold <= nonhelmet_count:
+                _pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 event = persist_window_event(
-                    image=pil_frame,
+                    image=_pil_frame,
                     source=source,
                     event_type="NGHI_NGO",
                     crop_candidates=crop_candidates,
@@ -472,8 +473,10 @@ def analyze_uploaded_video(
                     suspicion_events += 1
 
             if prev_head_count < settings.stream_event_threshold <= head_count:
+                if _pil_frame is None:
+                    _pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 event = persist_window_event(
-                    image=pil_frame,
+                    image=_pil_frame,
                     source=source,
                     event_type="VI_PHAM",
                     crop_candidates=crop_candidates,
@@ -629,19 +632,24 @@ def generate_processed_video_stream(
             window_nonhelmet.append(1 if frame_has_nonhelmet else 0)
             head_count = sum(window_head)
             nonhelmet_count = sum(window_nonhelmet)
-            pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
+            # Convert to PIL only when a threshold crossing actually triggers
+            # persist_window_event — avoids BGR→RGB copy on every processed frame.
+            _pil_frame: Image.Image | None = None
             if prev_nonhelmet_count < settings.stream_event_threshold <= nonhelmet_count:
+                _pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 persist_window_event(
-                    image=pil_frame,
+                    image=_pil_frame,
                     source=source,
                     event_type="NGHI_NGO",
                     crop_candidates=crop_candidates,
                 )
 
             if prev_head_count < settings.stream_event_threshold <= head_count:
+                if _pil_frame is None:
+                    _pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 persist_window_event(
-                    image=pil_frame,
+                    image=_pil_frame,
                     source=source,
                     event_type="VI_PHAM",
                     crop_candidates=crop_candidates,

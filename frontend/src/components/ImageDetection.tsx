@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import appText from '../content/app-text.vi.json';
 import { API_BASE } from '../services/api';
 import { BBoxCanvas, getColor, type Detection } from './BBoxCanvas';
+import { LoadingOverlay } from './LoadingOverlay';
 
 export function ImageDetection() {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -137,6 +138,10 @@ export function ImageDetection() {
               alt="Uploaded preview"
               className="block w-full object-contain"
             />
+          )}
+
+          {isUploading && (
+            <LoadingOverlay label={appText.upload.sendingStatus} />
           )}
         </div>
       ) : (

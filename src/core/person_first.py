@@ -76,6 +76,8 @@ class PersonFirstPipeline:
         self._cache: dict[int, tuple[str, float, tuple[int, int, int, int], int]] = {}
         self._frame_no: int = 0
         self._last_results: list[PersonHelmetResult] = []
+        # Cached persons from the previous detection run (used for interval skipping)
+        self._last_persons: list[tuple[int, int, int, int, float, int | None]] = []
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -84,6 +86,7 @@ class PersonFirstPipeline:
         self._cache.clear()
         self._frame_no = 0
         self._last_results = []
+        self._last_persons = []
 
     @property
     def last_results(self) -> list[PersonHelmetResult]:
@@ -111,12 +114,22 @@ class PersonFirstPipeline:
         """
         self._frame_no += 1
 
-        if use_tracking:
-            persons = self._detector.track_persons(frame, tracker=_VIDEO_TRACKER_CFG)
-            # persons: (x1, y1, x2, y2, conf, track_id | None)
+        # Re-run person detection every person_detection_interval frames.
+        # Default interval=1 means every frame (no accuracy change).
+        # Increase to 2–4 on weak CPU deployments: person boxes are reused between
+        # runs; helmet re-checks still happen per frame via the helmet_recheck_interval
+        # cache.  Set PERSON_DETECTION_INTERVAL=1 to restore full per-frame detection.
+        interval = self._settings.person_detection_interval
+        if self._frame_no % interval == 0 or not self._last_persons:
+            if use_tracking:
+                persons = self._detector.track_persons(frame, tracker=_VIDEO_TRACKER_CFG)
+                # persons: (x1, y1, x2, y2, conf, track_id | None)
+            else:
+                raw = self._detector.detect_persons(frame)
+                persons = [(x1, y1, x2, y2, conf, None) for x1, y1, x2, y2, conf in raw]
+            self._last_persons = persons
         else:
-            raw = self._detector.detect_persons(frame)
-            persons = [(x1, y1, x2, y2, conf, None) for x1, y1, x2, y2, conf in raw]
+            persons = self._last_persons
 
         results: list[PersonHelmetResult] = []
 

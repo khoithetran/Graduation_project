@@ -24,7 +24,7 @@
     "sectionTitle": "Trạng thái tải lên",
     "defaultFileName": "Chưa có tệp được chọn",
     "defaultStatus": "Chọn một ảnh công trường để gửi đến dịch vụ /predict.",
-    "sendingStatus": "Đang gửi ảnh đến /predict...",
+    "sendingStatus": "Đang nhận diện...",
     "successFoundPrefix": "Nhận diện hoàn tất: Tìm thấy",
     "successFoundSuffix": "đối tượng.",
     "successEmpty": "Nhận diện hoàn tất: Không tìm thấy đối tượng nào trong ảnh.",
