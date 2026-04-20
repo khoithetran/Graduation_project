@@ -233,7 +233,9 @@ Real-time ByteTrack tracking demonstration:
 │   │   ├── schemas.py      #   Pydantic models (all request/response types)
 │   │   └── main.py         #   App factory, lifespan, CORS, routers
 │   ├── core/
-│   │   ├── predictor.py    #   ONNX singleton loader
+│   │   ├── predictor.py    #   ONNX singleton loader (helmet model)
+│   │   ├── person_detector.py  #   Singleton YOLOv8n person detector + ByteTrack
+│   │   ├── person_first.py     #   Two-stage pipeline: person → helmet crop
 │   │   ├── streaming.py    #   MJPEG streaming, ByteTrack, ViolationTracker
 │   │   ├── history.py      #   JSONL event log + image persistence
 │   │   ├── llm_reporter.py #   Gemini 2.0 Flash report generator (rate-limited)
@@ -337,7 +339,7 @@ All runtime behaviour is controlled by environment variables (`.env` file):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_PATH` | `models/yolov8s_ap.onnx` | Path to model weights |
+| `MODEL_PATH` | `models/yolov8s_ap.onnx` | Path to helmet model weights |
 | `CONFIDENCE_THRESHOLD` | `0.25` | Minimum detection confidence |
 | `PORT` | `7860` | Server port (Hugging Face Spaces requires 7860) |
 | `LOG_LEVEL` | `INFO` | Python logging level |
@@ -346,6 +348,20 @@ All runtime behaviour is controlled by environment variables (`.env` file):
 | `REPORT_INTERVAL_HOURS` | `4` | Auto PDF generation interval (hours) |
 
 > If `GEMINI_API_KEY` is not set, the system still works — "Xem báo cáo" returns a pre-built fallback report instead of calling Gemini.
+
+### Person-First Pipeline Variables
+
+Only relevant when `PERSON_FIRST_ENABLED=true`:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PERSON_FIRST_ENABLED` | `false` | Enable two-stage person → helmet pipeline |
+| `PERSON_MODEL_PATH` | _(auto)_ | Path to person detector weights; omit to auto-download `yolov8n.pt` |
+| `PERSON_CONFIDENCE_THRESHOLD` | `0.40` | Minimum confidence to accept a person detection |
+| `PERSON_DETECTION_INTERVAL` | `1` | Run person detector every N processed frames |
+| `HELMET_RECHECK_INTERVAL` | `5` | Re-run helmet model every N frames per tracked person |
+| `PERSON_CROP_MARGIN` | `0.05` | Fractional padding added around each person crop |
+| `UPPER_BODY_CROP_RATIO` | `0.60` | Top fraction of person bbox used as helmet crop |
 
 ---
 
