@@ -199,8 +199,23 @@ class Predictor:
         return boxes, class_counts
 
     def _select_device(self, model_path: Path) -> str | int:
-        """Choose the best available device for the configured model."""
+        """Choose the best available device for the configured model.
+
+        For ONNX models, prefers CUDAExecutionProvider when onnxruntime-gpu is
+        installed (returns device index 0).  Falls back to CPU transparently.
+        Override via ONNX_EXECUTION_PROVIDER env var (e.g. 'CPUExecutionProvider').
+        """
         if model_path.suffix.lower() == ".onnx":
+            override = self.settings.onnx_execution_provider
+            if override:
+                return "cpu" if "CPU" in override.upper() else 0
+            try:
+                import onnxruntime as ort
+                if "CUDAExecutionProvider" in ort.get_available_providers():
+                    logger.info("ONNX Runtime: CUDAExecutionProvider available — using GPU.")
+                    return 0
+            except Exception:
+                logger.debug("ONNX Runtime provider check failed; using CPU.", exc_info=True)
             return "cpu"
 
         try:

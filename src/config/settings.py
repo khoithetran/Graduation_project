@@ -80,6 +80,17 @@ class Settings:
     )
 
     @property
+    def onnx_execution_provider(self) -> str:
+        """ONNX Runtime execution provider override.
+
+        Leave empty (default) for auto-detection: CUDAExecutionProvider when
+        onnxruntime-gpu is installed and a CUDA device is available, otherwise
+        CPUExecutionProvider.  Set to 'CPUExecutionProvider' to force CPU even
+        when a GPU is present.
+        """
+        return os.getenv("ONNX_EXECUTION_PROVIDER", "")
+
+    @property
     def data_dir(self) -> Path:
         """Return the top-level data directory."""
         return self.root_dir / "data"

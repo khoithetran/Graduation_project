@@ -263,7 +263,7 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 | `PERSON_FIRST_ENABLED` | `false` | Bật pipeline 2 tầng |
 | `PERSON_MODEL_PATH` | _(auto)_ | Đường dẫn model người; bỏ trống để tự tải `yolov8n.pt` |
 | `PERSON_CONFIDENCE_THRESHOLD` | `0.40` | Ngưỡng confidence phát hiện người |
-| `PERSON_DETECTION_INTERVAL` | `1` | Chạy person detector mỗi N frame (cấu hình xong, chưa áp dụng vào loop) |
+| `PERSON_DETECTION_INTERVAL` | `1` | Chạy person detector mỗi N frame (default=1, full accuracy; tăng 2–4 để giảm tải CPU) |
 | `HELMET_RECHECK_INTERVAL` | `5` | Tái chạy helmet model mỗi N frame per track |
 | `PERSON_CROP_MARGIN` | `0.05` | Padding xung quanh crop |
 | `UPPER_BODY_CROP_RATIO` | `0.60` | Tỉ lệ phần trên của bbox người dùng làm crop |
@@ -272,9 +272,44 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 
 | Hạn chế | Mức độ |
 |---------|--------|
-| `PERSON_DETECTION_INTERVAL` chưa được áp dụng vào streaming loop (person detection chạy mỗi frame) | Thấp |
 | `yolov8n.pt` tự tải lần đầu (~6 MB) — tăng cold-start trên HF Spaces | Thấp |
 | ByteTrack state dùng chung trong singleton tracker khi nhiều session đồng thời | Thấp (demo single-user) |
+
+---
+
+---
+
+## Phase 9 — Performance Optimizations & UI Polish ✅
+
+> Tăng tốc inference sau deploy và cải thiện UX loading mà không giảm accuracy.
+
+### Frontend — Loading UX
+
+- [x] `frontend/src/components/LoadingOverlay.tsx` — Component overlay tái sử dụng: nền mờ `backdrop-blur`, thanh indeterminate amber chạy trái→phải (CSS `@keyframes loading-slide`)
+- [x] `frontend/src/index.css` — Thêm `@keyframes loading-slide` + `.loading-bar`
+- [x] `ImageDetection.tsx` — Overlay chồng trực tiếp lên ảnh preview khi `isUploading`; ảnh gốc hiển thị ngay, overlay biến mất khi nhận được kết quả
+- [x] `VideoTracking.tsx` — Ba trạng thái rõ ràng (`isUploading` / `streamUrl` / idle); `aspect-video` container ổn định khi loading tránh layout jump; stream chỉ phát khi backend sẵn sàng
+- [x] `app-text.vi.json` — `sendingStatus`: `"Đang gửi ảnh đến /predict..."` → `"Đang nhận diện..."` (ẩn chi tiết endpoint)
+- [x] Dọn `console.log`/`console.warn` thừa trong `VideoTracking.tsx`
+
+### Backend — Tối ưu không giảm accuracy
+
+- [x] `src/core/streaming.py` — **Defer PIL conversion**: `Image.fromarray + cv2.cvtColor` chỉ thực hiện khi threshold thực sự bị vượt qua trong `generate_processed_video_stream()` và `analyze_uploaded_video()` — giảm đáng kể CPU overhead trên video dài
+- [x] `src/core/person_first.py` — **Tích hợp `PERSON_DETECTION_INTERVAL`**: skip person detection trên frame giữa các interval, dùng cached persons từ lần chạy trước; default=1 (mỗi frame, không thay đổi accuracy); tăng 2–4 trên CPU yếu
+- [x] `src/core/person_detector.py` — **Bỏ hardcode `device="cpu"`**: thêm `_select_device()` tự detect ONNX CUDA provider hoặc PyTorch CUDA; fallback CPU an toàn; hỗ trợ cả `.pt` và `.onnx` person model
+- [x] `src/core/predictor.py` — **Cải thiện `_select_device()`**: kiểm tra `onnxruntime.get_available_providers()` thay vì luôn trả về `"cpu"` cho ONNX; hỗ trợ `ONNX_EXECUTION_PROVIDER` override
+- [x] `src/config/settings.py` — Thêm `@property onnx_execution_provider` cho override thủ công
+
+### Config mới
+
+| Biến | Mặc định | Mô tả |
+|------|---------|-------|
+| `ONNX_EXECUTION_PROVIDER` | _(auto)_ | Override ONNX Runtime provider: `CPUExecutionProvider` hoặc `CUDAExecutionProvider` (yêu cầu `onnxruntime-gpu`) |
+
+### Tài liệu
+
+- [x] `.env.example` — Thêm `ONNX_EXECUTION_PROVIDER`, cập nhật comments `PERSON_DETECTION_INTERVAL`, hướng dẫn export ONNX person model
+- [x] `README.md` — Thêm `ONNX_EXECUTION_PROVIDER` vào bảng config; cập nhật `PERSON_DETECTION_INTERVAL` mô tả; thêm hướng dẫn ONNX person model; engineering notes
 
 ---
 
@@ -293,3 +328,4 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 | Integration testing | Passed ✅ |
 | Tech debt cleanup | Complete ✅ |
 | Person-first two-stage detection pipeline | Complete ✅ |
+| Performance optimizations & UI loading UX | Complete ✅ |

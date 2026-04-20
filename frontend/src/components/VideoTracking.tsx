@@ -7,6 +7,7 @@ import type { VideoAlert } from '../types';
 import { getColor } from './BBoxCanvas';
 import { AlertDetailModal } from './AlertDetailModal';
 import { ReportModal } from './ReportModal';
+import { LoadingOverlay } from './LoadingOverlay';
 
 export function VideoTracking() {
   const [videoId, setVideoId] = useState<string | null>(null);
@@ -34,20 +35,13 @@ export function VideoTracking() {
           `${API_BASE}/api/stream/video/alerts?video_id=${encodeURIComponent(videoId)}`,
           { cache: 'no-store' },   // prevent browser caching stale responses
         );
-        if (!res.ok) {
-          console.warn('[alerts] poll failed:', res.status);
-          return;
-        }
+        if (!res.ok) return;
         const data = (await res.json()) as VideoAlert[];
         if (!cancelled) {
-          // Always replace — even with 0 items — so state stays in sync
           setAlerts(data);
-          if (data.length > 0) {
-            console.log(`[alerts] received ${data.length} alert(s)`);
-          }
         }
-      } catch (err) {
-        console.warn('[alerts] fetch error:', err);
+      } catch {
+        // ignore poll errors silently
       }
     };
 
@@ -173,7 +167,11 @@ export function VideoTracking() {
       )}
 
       {/* Video player / upload zone */}
-      {streamUrl ? (
+      {isUploading ? (
+        <div className="relative aspect-video overflow-hidden rounded-[1.75rem] border border-white/10 bg-stone-950">
+          <LoadingOverlay label={appText.videoTracking.uploadLoading} />
+        </div>
+      ) : streamUrl ? (
         <div className="overflow-hidden rounded-[1.75rem] border bg-stone-950 border-white/10 transition">
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <p className="text-sm font-semibold text-white">{appText.videoTracking.sectionTitle}</p>
@@ -240,9 +238,7 @@ export function VideoTracking() {
             </svg>
           </div>
           <div className="text-center">
-            <p className="text-sm font-medium text-stone-300">
-              {isUploading ? appText.videoTracking.uploadLoading : appText.videoTracking.uploadIdle}
-            </p>
+            <p className="text-sm font-medium text-stone-300">{appText.videoTracking.uploadIdle}</p>
             <p className="mt-1 text-xs text-stone-500">{appText.videoTracking.defaultStatus}</p>
           </div>
           <input type="file" accept="video/*" className="hidden" onChange={handleUpload} disabled={isUploading} />

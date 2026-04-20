@@ -41,7 +41,8 @@ pinned: false
 | **Timestamp-Synchronized Alerts** | Click any violation crop to instantly seek the video to that exact moment and pause for inspection |
 | **AI Violation Reports** | Gemini 2.0 Flash generates Vietnamese-language reports per alert — risk level, description, recommendations |
 | **Instant PDF Export** | Download a violation report PDF from the current session at any time, no history or LLM required |
-| **ONNX-Optimized Inference** | Model exported from `.pt` to `.onnx` for significantly lower latency and memory footprint on CPU-only cloud environments |
+| **ONNX-Optimized Inference** | Model exported from `.pt` to `.onnx` for significantly lower latency and memory footprint on CPU-only cloud environments; auto-selects CUDA provider when `onnxruntime-gpu` is available |
+| **Visual Loading Feedback** | Indeterminate amber progress bar overlays the image/video preview during inference — no layout jump, no spinner |
 | **Modern React UI** | Responsive TypeScript + Vite frontend served from the same Docker image — zero CORS friction |
 | **Violation History** | Persistent event log with full-frame captures and cropped evidence per violation |
 
@@ -173,7 +174,7 @@ PERSON_MODEL_PATH=models/yolov8n.onnx
 | `UPPER_BODY_CROP_RATIO` | `0.60` | Top fraction of person bbox used as helmet crop |
 | `PERSON_CROP_MARGIN` | `0.05` | Fractional padding added around the crop |
 | `HELMET_RECHECK_INTERVAL` | `5` | Re-run helmet model every N processed frames per track |
-| `PERSON_DETECTION_INTERVAL` | `1` | Run person detector every N processed frames |
+| `PERSON_DETECTION_INTERVAL` | `1` | Run person detector every N processed frames — default=1 (every frame, full accuracy); set to 2–4 on weak CPU to halve person-model calls at the cost of brief lag when a new person enters |
 
 ### Visual Differences (Video / Live modes)
 
@@ -344,6 +345,7 @@ All runtime behaviour is controlled by environment variables (`.env` file):
 | `PORT` | `7860` | Server port (Hugging Face Spaces requires 7860) |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `CORS_ORIGINS` | `http://localhost:5173` | Comma-separated list of allowed origins |
+| `ONNX_EXECUTION_PROVIDER` | _(auto)_ | ONNX Runtime provider: empty = auto-detect; set to `CPUExecutionProvider` to force CPU or `CUDAExecutionProvider` to force GPU (requires `onnxruntime-gpu`) |
 | `GEMINI_API_KEY` | _(empty)_ | Google Gemini API key for AI reports — free at [aistudio.google.com](https://aistudio.google.com/apikey) |
 | `REPORT_INTERVAL_HOURS` | `4` | Auto PDF generation interval (hours) |
 
@@ -356,12 +358,19 @@ Only relevant when `PERSON_FIRST_ENABLED=true`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PERSON_FIRST_ENABLED` | `false` | Enable two-stage person → helmet pipeline |
-| `PERSON_MODEL_PATH` | _(auto)_ | Path to person detector weights; omit to auto-download `yolov8n.pt` |
+| `PERSON_MODEL_PATH` | _(auto)_ | Path to person detector weights; supports `.pt` and `.onnx`; omit to auto-download `yolov8n.pt` |
 | `PERSON_CONFIDENCE_THRESHOLD` | `0.40` | Minimum confidence to accept a person detection |
-| `PERSON_DETECTION_INTERVAL` | `1` | Run person detector every N processed frames |
+| `PERSON_DETECTION_INTERVAL` | `1` | Run person detector every N processed frames (default=1, full accuracy; increase to 2–4 on weak CPU to reduce load with minor temporal lag) |
 | `HELMET_RECHECK_INTERVAL` | `5` | Re-run helmet model every N frames per tracked person |
 | `PERSON_CROP_MARGIN` | `0.05` | Fractional padding added around each person crop |
 | `UPPER_BODY_CROP_RATIO` | `0.60` | Top fraction of person bbox used as helmet crop |
+
+**Using an ONNX person model** (faster CPU inference):
+```bash
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx', imgsz=640)"
+mv yolov8n.onnx models/
+```
+Then set `PERSON_MODEL_PATH=models/yolov8n.onnx`. The backend auto-detects the format and selects the appropriate device.
 
 ---
 
@@ -370,6 +379,8 @@ Only relevant when `PERSON_FIRST_ENABLED=true`:
 - **Singleton model loader** — the ONNX model is loaded once at startup and reused across all requests; no per-request overhead.
 - **Same-origin deployment** — on Hugging Face Spaces, React static files are served by FastAPI itself, so all API calls use relative paths with no hardcoded URLs or CORS issues.
 - **ByteTrack confirmation window** — violations are only alerted after a rolling 3-of-5 frame window, eliminating single-frame false positives.
+- **Deferred PIL conversion** — `cv2.cvtColor + Image.fromarray` in the streaming loop runs only when a threshold crossing actually triggers `persist_window_event`, not on every processed frame.
+- **ONNX provider auto-detection** — both the helmet predictor and the person detector check `onnxruntime.get_available_providers()` at model load and select CUDAExecutionProvider automatically if available; no manual config required for GPU machines.
 - **Gemini rate limiter** — a global threading lock enforces ≤12 calls/minute (safely under the free-tier 15 RPM limit); in-flight deduplication prevents redundant calls for the same alert.
 - **Instant PDF** — `POST /api/report/simple-pdf` accepts raw alert data from the frontend and builds a PDF immediately without history lookup or LLM calls; image aspect ratios are preserved.
 - **Runtime data isolation** — detection history and uploaded videos are written to `/app/data` inside the container (gitignored); only the model weights and source code are version-controlled.
