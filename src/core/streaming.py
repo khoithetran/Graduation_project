@@ -18,6 +18,7 @@ from PIL import Image
 from src.api.schemas import HistoryEvent, LiveStartResponse, UploadVideoResponse, VideoDetectResponse
 from src.config.settings import get_settings
 from src.core.history import persist_window_event
+from src.core.person_first import PersonFirstPipeline, make_person_first_pipeline
 from src.core.predictor import Predictor
 from src.utils.detection import is_head_class, is_nonhelmet_class
 from src.utils.image import clamp_bbox, draw_detection, encode_jpeg
@@ -182,6 +183,8 @@ class _WebcamSession:
     tracker: _ViolationTracker = field(default_factory=_ViolationTracker)
     alerts: list[dict] = field(default_factory=list)
     last_active: float = field(default_factory=time.time)
+    # Set to a PersonFirstPipeline instance when PERSON_FIRST_ENABLED=true
+    person_pipeline: PersonFirstPipeline | None = field(default=None)
 
 
 # Keyed by live_id → list of violation alert dicts for IP camera streams.
@@ -213,6 +216,57 @@ def _crop_b64(frame: np.ndarray, x1: int, y1: int, x2: int, y2: int) -> str:
     if not ok:
         return ""
     return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
+
+
+def _extract_frame_boxes_standard(
+    frame: np.ndarray,
+    predictor: Predictor,
+    tracker_cfg: str,
+    frame_label: int = 0,
+) -> list[tuple[str, float, int, int, int, int, int | None]]:
+    """Run standard single-stage ByteTrack inference and return normalised boxes.
+
+    Returns a list of ``(class_name, conf, x1, y1, x2, y2, track_id)`` tuples
+    using the same format produced by ``PersonFirstPipeline.process_frame_as_boxes``
+    so both code paths share one unified processing loop downstream.
+    """
+    try:
+        results = predictor.track_frame(frame, tracker=tracker_cfg)
+    except Exception:
+        logger.exception("ByteTrack failed for frame %d", frame_label)
+        return []
+
+    if not results:
+        return []
+
+    result = results[0]
+    boxes = result.boxes
+    if boxes is None:
+        return []
+
+    has_ids = boxes.id is not None
+    height, width = frame.shape[:2]
+    frame_boxes: list[tuple[str, float, int, int, int, int, int | None]] = []
+
+    for i in range(len(boxes)):
+        box = boxes[i]
+        class_id = int(box.cls[0].item())
+        class_name = str(result.names.get(class_id, str(class_id)))
+        confidence = float(box.conf[0].item())
+        x1, y1, x2, y2 = box.xyxy[0].tolist()
+        x1_i, y1_i, x2_i, y2_i = clamp_bbox(x1, y1, x2, y2, width=width, height=height)
+        if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
+            continue
+
+        raw_bt_id: int | None = None
+        if has_ids:
+            val = boxes.id[i].item()
+            if val == val:  # NaN check: NaN != NaN
+                raw_bt_id = int(val)
+
+        frame_boxes.append((class_name, confidence, x1_i, y1_i, x2_i, y2_i, raw_bt_id))
+
+    return frame_boxes
 
 
 @dataclass(slots=True)
@@ -251,7 +305,10 @@ def process_webcam_frame(
     if session_id not in WEBCAM_SESSIONS:
         if len(WEBCAM_SESSIONS) >= _MAX_WEBCAM_SESSIONS:
             WEBCAM_SESSIONS.popitem(last=False)
-        WEBCAM_SESSIONS[session_id] = _WebcamSession()
+        sess = _WebcamSession()
+        if settings.person_first_enabled:
+            sess.person_pipeline = make_person_first_pipeline()
+        WEBCAM_SESSIONS[session_id] = sess
 
     session = WEBCAM_SESSIONS[session_id]
     session.last_active = now
@@ -266,58 +323,66 @@ def process_webcam_frame(
 
     height, width = frame.shape[:2]
 
-    # Run inference (predict, not track, to keep sessions isolated)
-    try:
-        results = predictor.predict(frame)
-    except Exception:
-        logger.exception("process_webcam_frame: prediction failed for session %s.", session_id)
-        return {"detections": [], "alerts": []}
-
+    # --- inference: person-first or standard single-stage ---
     detections_out: list[dict] = []
     new_alerts: list[dict] = []
     violation_hit_ids: set[int] = set()
 
-    if results:
-        result = results[0]
-        if result.boxes is not None:
-            for box in result.boxes:
-                class_id = int(box.cls[0].item())
-                class_name = str(result.names.get(class_id, str(class_id)))
-                confidence = float(box.conf[0].item())
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                x1_i, y1_i, x2_i, y2_i = clamp_bbox(x1, y1, x2, y2, width=width, height=height)
-                if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
-                    continue
+    if settings.person_first_enabled and session.person_pipeline is not None:
+        frame_boxes = session.person_pipeline.process_frame_as_boxes(
+            frame, use_tracking=False
+        )
+    else:
+        # Standard single-stage inference (no ByteTrack to keep sessions isolated)
+        try:
+            results = predictor.predict(frame)
+        except Exception:
+            logger.exception("process_webcam_frame: prediction failed for session %s.", session_id)
+            return {"detections": [], "alerts": []}
+        frame_boxes = []
+        if results:
+            result = results[0]
+            if result.boxes is not None:
+                for box in result.boxes:
+                    class_id = int(box.cls[0].item())
+                    class_name = str(result.names.get(class_id, str(class_id)))
+                    confidence = float(box.conf[0].item())
+                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    x1_i, y1_i, x2_i, y2_i = clamp_bbox(x1, y1, x2, y2, width=width, height=height)
+                    if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
+                        continue
+                    frame_boxes.append((class_name, float(box.conf[0].item()), x1_i, y1_i, x2_i, y2_i, None))
 
-                detections_out.append({
-                    "class_name": class_name,
-                    "confidence": round(confidence, 4),
-                    "x1": x1_i,
-                    "y1": y1_i,
-                    "x2": x2_i,
-                    "y2": y2_i,
-                })
+    for class_name, confidence, x1_i, y1_i, x2_i, y2_i, _track_id in frame_boxes:
+        detections_out.append({
+            "class_name": class_name,
+            "confidence": round(confidence, 4),
+            "x1": x1_i,
+            "y1": y1_i,
+            "x2": x2_i,
+            "y2": y2_i,
+        })
 
-                if is_head_class(class_name) or is_nonhelmet_class(class_name):
-                    # IoU-only pseudo-ID matching (no ByteTrack IDs available)
-                    resolved_id = session.tracker.resolve_id(None, (x1_i, y1_i, x2_i, y2_i))
-                    violation_hit_ids.add(resolved_id)
-                    if session.tracker.record_hit(resolved_id):
-                        logger.info(
-                            "Webcam alert: session=%s class=%s", session_id, class_name
-                        )
-                        crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
-                        if crop_data:
-                            alert = {
-                                "id": uuid.uuid4().hex,
-                                "wall_time": datetime.now().strftime("%H:%M:%S"),
-                                "class_name": class_name,
-                                "confidence": round(confidence, 4),
-                                "crop": crop_data,
-                            }
-                            if len(session.alerts) < _MAX_ALERTS_PER_VIDEO:
-                                session.alerts.append(alert)
-                            new_alerts.append(alert)
+        if is_head_class(class_name) or is_nonhelmet_class(class_name):
+            # IoU-only pseudo-ID matching (no ByteTrack IDs for webcam)
+            resolved_id = session.tracker.resolve_id(None, (x1_i, y1_i, x2_i, y2_i))
+            violation_hit_ids.add(resolved_id)
+            if session.tracker.record_hit(resolved_id):
+                logger.info(
+                    "Webcam alert: session=%s class=%s", session_id, class_name
+                )
+                crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
+                if crop_data:
+                    alert = {
+                        "id": uuid.uuid4().hex,
+                        "wall_time": datetime.now().strftime("%H:%M:%S"),
+                        "class_name": class_name,
+                        "confidence": round(confidence, 4),
+                        "crop": crop_data,
+                    }
+                    if len(session.alerts) < _MAX_ALERTS_PER_VIDEO:
+                        session.alerts.append(alert)
+                    new_alerts.append(alert)
 
     session.tracker.tick_absences(violation_hit_ids)
 
@@ -471,6 +536,11 @@ def generate_processed_video_stream(
     _reset_video_alerts(video_id)
     violation_tracker = _ViolationTracker()
 
+    # Create a fresh person-first pipeline instance for this stream (if enabled)
+    _person_pipeline: PersonFirstPipeline | None = None
+    if settings.person_first_enabled:
+        _person_pipeline = make_person_first_pipeline()
+
     try:
         while True:
             ret, frame = cap.read()
@@ -487,93 +557,70 @@ def generate_processed_video_stream(
             frame_has_nonhelmet = False
             crop_candidates: list[tuple[str, int, int, int, int]] = []
 
-            try:
-                results = predictor.track_frame(frame, tracker=_VIDEO_TRACKER_CFG)
-            except Exception:
-                logger.exception("ByteTrack failed for frame %d", processed_idx)
-                results = []
+            # --- inference: person-first or standard ByteTrack ---
+            if _person_pipeline is not None:
+                frame_boxes = _person_pipeline.process_frame_as_boxes(
+                    frame, use_tracking=True
+                )
+                _person_pipeline.draw_person_boxes(frame)
+            else:
+                frame_boxes = _extract_frame_boxes_standard(
+                    frame, predictor, _VIDEO_TRACKER_CFG, processed_idx
+                )
 
             # resolved IDs of violation objects seen this cycle (used by tick_absences)
             violation_hit_ids: set[int] = set()
 
-            if results:
-                result = results[0]
-                boxes = result.boxes
-                if boxes is not None:
-                    has_ids = boxes.id is not None
-                    height, width = frame.shape[:2]
-                    for i in range(len(boxes)):
-                        box = boxes[i]
-                        class_id = int(box.cls[0].item())
-                        class_name = str(result.names.get(class_id, str(class_id)))
-                        confidence = float(box.conf[0].item())
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-                        x1_i, y1_i, x2_i, y2_i = clamp_bbox(
-                            x1, y1, x2, y2, width=width, height=height
+            for class_name, confidence, x1_i, y1_i, x2_i, y2_i, raw_bt_id in frame_boxes:
+                if is_head_class(class_name):
+                    frame_has_head = True
+                if is_nonhelmet_class(class_name):
+                    frame_has_nonhelmet = True
+                if is_head_class(class_name) or is_nonhelmet_class(class_name):
+                    crop_candidates.append((class_name, x1_i, y1_i, x2_i, y2_i))
+                    resolved_id = violation_tracker.resolve_id(
+                        raw_bt_id, (x1_i, y1_i, x2_i, y2_i)
+                    )
+                    violation_hit_ids.add(resolved_id)
+                    window = violation_tracker.history.get(resolved_id)
+                    logger.debug(
+                        "[TRACK] frame=%d class=%s bt_id=%s resolved_id=%d window=%s sum=%d",
+                        processed_idx, class_name, raw_bt_id, resolved_id,
+                        list(window) if window else [],
+                        sum(window) if window else 0,
+                    )
+                    if violation_tracker.record_hit(resolved_id):
+                        logger.info(
+                            "Alert triggered: resolved_id=%d class=%s t=%.2fs",
+                            resolved_id, class_name, timestamp_sec,
                         )
-                        if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
-                            continue
-
-                        # Extract ByteTrack ID; guard against NaN values that
-                        # Ultralytics can place in boxes.id for unconfirmed tracks
-                        raw_bt_id: int | None = None
-                        if has_ids:
-                            val = boxes.id[i].item()
-                            if val == val:  # NaN check: NaN != NaN
-                                raw_bt_id = int(val)
-
-                        is_violation = is_head_class(class_name) or is_nonhelmet_class(class_name)
-                        if is_head_class(class_name):
-                            frame_has_head = True
-                        if is_nonhelmet_class(class_name):
-                            frame_has_nonhelmet = True
-                        if is_violation:
-                            crop_candidates.append((class_name, x1_i, y1_i, x2_i, y2_i))
-                            # Resolve a stable ID — uses ByteTrack ID when available,
-                            # falls back to spatial IoU matching otherwise
-                            resolved_id = violation_tracker.resolve_id(
-                                raw_bt_id, (x1_i, y1_i, x2_i, y2_i)
-                            )
-                            violation_hit_ids.add(resolved_id)
-                            window = violation_tracker.history.get(resolved_id)
+                        crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
+                        if crop_data:
+                            _append_video_alert(video_id, {
+                                "id": uuid.uuid4().hex,
+                                "timestamp_sec": round(timestamp_sec, 2),
+                                "class_name": class_name,
+                                "confidence": round(confidence, 4),
+                                "crop": crop_data,
+                                "x1": x1_i,
+                                "y1": y1_i,
+                                "x2": x2_i,
+                                "y2": y2_i,
+                            })
                             logger.debug(
-                                "[TRACK] frame=%d class=%s bt_id=%s resolved_id=%d window=%s sum=%d",
-                                processed_idx, class_name, raw_bt_id, resolved_id,
-                                list(window) if window else [],
-                                sum(window) if window else 0,
+                                "Alert stored: video_id=%s total=%d",
+                                video_id, len(VIDEO_ALERTS.get(video_id, [])),
                             )
-                            if violation_tracker.record_hit(resolved_id):
-                                logger.info(
-                                    "Alert triggered: resolved_id=%d class=%s t=%.2fs",
-                                    resolved_id, class_name, timestamp_sec,
-                                )
-                                crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
-                                if crop_data:
-                                    _append_video_alert(video_id, {
-                                        "id": uuid.uuid4().hex,
-                                        "timestamp_sec": round(timestamp_sec, 2),
-                                        "class_name": class_name,
-                                        "confidence": round(confidence, 4),
-                                        "crop": crop_data,
-                                        "x1": x1_i,
-                                        "y1": y1_i,
-                                        "x2": x2_i,
-                                        "y2": y2_i,
-                                    })
-                                    logger.debug(
-                                        "Alert stored: video_id=%s total=%d",
-                                        video_id, len(VIDEO_ALERTS.get(video_id, [])),
-                                    )
-                        draw_detection(
-                            frame,
-                            class_name=class_name,
-                            confidence=confidence,
-                            x1=x1_i,
-                            y1=y1_i,
-                            x2=x2_i,
-                            y2=y2_i,
-                            track_id=raw_bt_id,
-                        )
+                draw_detection(
+                    frame,
+                    class_name=class_name,
+                    confidence=confidence,
+                    x1=x1_i,
+                    y1=y1_i,
+                    x2=x2_i,
+                    y2=y2_i,
+                    track_id=raw_bt_id,
+                )
 
             # Record misses and apply grace-period logic for absent tracks
             violation_tracker.tick_absences(violation_hit_ids)
@@ -632,6 +679,11 @@ def generate_live_stream(live_id: str, predictor: Predictor):
     _reset_live_alerts(live_id)
     violation_tracker = _ViolationTracker()
 
+    # Fresh person-first pipeline for this live stream (if enabled)
+    _person_pipeline: PersonFirstPipeline | None = None
+    if settings.person_first_enabled:
+        _person_pipeline = make_person_first_pipeline()
+
     last_send_time = time.perf_counter()
     target_dt = 1.0 / settings.target_stream_fps
     frame_idx = 0
@@ -649,67 +701,49 @@ def generate_live_stream(live_id: str, predictor: Predictor):
             last_send_time = time.perf_counter()
             frame_idx += 1
 
-            try:
-                results = predictor.track_frame(frame, tracker=_VIDEO_TRACKER_CFG)
-            except Exception:
-                logger.exception("ByteTrack failed for live frame %d (live_id=%s).", frame_idx, live_id)
-                results = []
+            # --- inference: person-first or standard ByteTrack ---
+            if _person_pipeline is not None:
+                frame_boxes = _person_pipeline.process_frame_as_boxes(
+                    frame, use_tracking=True
+                )
+                _person_pipeline.draw_person_boxes(frame)
+            else:
+                frame_boxes = _extract_frame_boxes_standard(
+                    frame, predictor, _VIDEO_TRACKER_CFG, frame_idx
+                )
 
             violation_hit_ids: set[int] = set()
 
-            if results:
-                result = results[0]
-                boxes = result.boxes
-                if boxes is not None:
-                    has_ids = boxes.id is not None
-                    height, width = frame.shape[:2]
-                    for i in range(len(boxes)):
-                        box = boxes[i]
-                        class_id = int(box.cls[0].item())
-                        class_name = str(result.names.get(class_id, str(class_id)))
-                        confidence = float(box.conf[0].item())
-                        x1, y1, x2, y2 = box.xyxy[0].tolist()
-                        x1_i, y1_i, x2_i, y2_i = clamp_bbox(
-                            x1, y1, x2, y2, width=width, height=height
+            for class_name, confidence, x1_i, y1_i, x2_i, y2_i, raw_bt_id in frame_boxes:
+                if is_head_class(class_name) or is_nonhelmet_class(class_name):
+                    resolved_id = violation_tracker.resolve_id(
+                        raw_bt_id, (x1_i, y1_i, x2_i, y2_i)
+                    )
+                    violation_hit_ids.add(resolved_id)
+                    if violation_tracker.record_hit(resolved_id):
+                        logger.info(
+                            "Live alert: live_id=%s class=%s", live_id, class_name
                         )
-                        if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
-                            continue
+                        crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
+                        if crop_data:
+                            _append_live_alert(live_id, {
+                                "id": uuid.uuid4().hex,
+                                "wall_time": datetime.now().strftime("%H:%M:%S"),
+                                "class_name": class_name,
+                                "confidence": round(confidence, 4),
+                                "crop": crop_data,
+                            })
 
-                        raw_bt_id: int | None = None
-                        if has_ids:
-                            val = boxes.id[i].item()
-                            if val == val:  # NaN check
-                                raw_bt_id = int(val)
-
-                        if is_head_class(class_name) or is_nonhelmet_class(class_name):
-                            resolved_id = violation_tracker.resolve_id(
-                                raw_bt_id, (x1_i, y1_i, x2_i, y2_i)
-                            )
-                            violation_hit_ids.add(resolved_id)
-                            if violation_tracker.record_hit(resolved_id):
-                                logger.info(
-                                    "Live alert: live_id=%s class=%s", live_id, class_name
-                                )
-                                crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
-                                if crop_data:
-                                    _append_live_alert(live_id, {
-                                        "id": uuid.uuid4().hex,
-                                        "wall_time": datetime.now().strftime("%H:%M:%S"),
-                                        "class_name": class_name,
-                                        "confidence": round(confidence, 4),
-                                        "crop": crop_data,
-                                    })
-
-                        draw_detection(
-                            frame,
-                            class_name=class_name,
-                            confidence=confidence,
-                            x1=x1_i,
-                            y1=y1_i,
-                            x2=x2_i,
-                            y2=y2_i,
-                            track_id=raw_bt_id,
-                        )
+                draw_detection(
+                    frame,
+                    class_name=class_name,
+                    confidence=confidence,
+                    x1=x1_i,
+                    y1=y1_i,
+                    x2=x2_i,
+                    y2=y2_i,
+                    track_id=raw_bt_id,
+                )
 
             violation_tracker.tick_absences(violation_hit_ids)
 

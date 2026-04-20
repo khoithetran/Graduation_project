@@ -59,6 +59,26 @@ class Settings:
     allowed_image_content_types: tuple[str, ...] = ("image/jpeg", "image/png")
     allowed_model_suffixes: tuple[str, ...] = (".pt", ".onnx", ".engine")
 
+    # ── Person-first pipeline ─────────────────────────────────────────────────
+    person_first_enabled: bool = field(
+        default_factory=lambda: os.getenv("PERSON_FIRST_ENABLED", "false").lower() == "true"
+    )
+    person_confidence_threshold: float = field(
+        default_factory=lambda: float(os.getenv("PERSON_CONFIDENCE_THRESHOLD", "0.40"))
+    )
+    person_detection_interval: int = field(
+        default_factory=lambda: int(os.getenv("PERSON_DETECTION_INTERVAL", "1"))
+    )
+    helmet_recheck_interval: int = field(
+        default_factory=lambda: int(os.getenv("HELMET_RECHECK_INTERVAL", "5"))
+    )
+    person_crop_margin: float = field(
+        default_factory=lambda: float(os.getenv("PERSON_CROP_MARGIN", "0.05"))
+    )
+    upper_body_crop_ratio: float = field(
+        default_factory=lambda: float(os.getenv("UPPER_BODY_CROP_RATIO", "0.60"))
+    )
+
     @property
     def data_dir(self) -> Path:
         """Return the top-level data directory."""
@@ -142,6 +162,18 @@ class Settings:
             return Path(configured).expanduser().resolve()
 
         return self.models_dir / "yolov8s_ap.onnx"
+
+    @property
+    def person_model_path(self) -> Path:
+        """Resolve the person-detector model path (auto-downloads yolov8n.pt if absent)."""
+        configured = os.getenv("PERSON_MODEL_PATH")
+        if configured:
+            return Path(configured).expanduser().resolve()
+        explicit = self.models_dir / "yolov8n.pt"
+        if explicit.exists():
+            return explicit
+        # Fall back to letting Ultralytics auto-download from its cache
+        return Path("yolov8n.pt")
 
     def ensure_directories(self) -> None:
         """Create the directories the application expects at runtime."""

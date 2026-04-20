@@ -90,6 +90,101 @@ pinned: false
 
 ---
 
+## Person-First Detection Pipeline
+
+> Available since this commit — off by default, no existing behaviour changes.
+
+### Motivation
+
+The baseline single-stage model (YOLOv8s) runs on the **full frame** and can
+miss people in difficult poses (seated, crouched, partially occluded).  Because
+the PPE conclusion is drawn from the model output alone, missed people produce
+false "all helmets OK" frames.
+
+### How It Works
+
+```
+Full frame
+   │
+   ▼
+[Person detector – YOLOv8n]
+   │  (x1,y1,x2,y2, track_id)  per person
+   ▼
+Upper-body crop  ──► [Helmet model – YOLOv8s ONNX]
+   │                        │
+   │                  (helmet / head / non-helmet)
+   │                  mapped back to frame coords
+   ▼
+Same ViolationTracker  →  same alert / history logic
+```
+
+1. **Person detection** — YOLOv8n detects every `person` in the frame.
+   It is ~5× smaller than YOLOv8s and better at detecting people at unusual
+   poses because COCO training data covers diverse human poses.
+
+2. **ByteTrack person tracking** — stable person IDs are maintained across
+   frames (video/live modes) so the helmet status cache is keyed by person.
+
+3. **Upper-body crop** — the top `UPPER_BODY_CROP_RATIO` (default 60 %) of
+   each person bbox is cropped with a small margin and fed to the helmet model.
+   The helmet now occupies a larger fraction of the model's input → better
+   recall for small/distant people.
+
+4. **Helmet status cache** — the helmet model only reruns every
+   `HELMET_RECHECK_INTERVAL` frames per person (default: every 5 processed
+   frames).  Between checks the last known status is reused.  This keeps the
+   total compute roughly constant compared with the standard pipeline.
+
+5. **Same outputs** — violation class names, confidence values, and frame
+   coordinates flow into the exact same `_ViolationTracker` / alert /
+   history / PDF / report logic.  No frontend changes required.
+
+### Enabling Person-First Mode
+
+Set in `.env` (or as an environment variable):
+
+```env
+PERSON_FIRST_ENABLED=true
+```
+
+The first request will auto-download `yolov8n.pt` (~6 MB) from Ultralytics
+into `~/.ultralytics/`.  To pin a local copy:
+
+```env
+PERSON_MODEL_PATH=models/yolov8n.pt
+```
+
+Or export to ONNX for faster CPU inference:
+
+```bash
+python -c "from ultralytics import YOLO; YOLO('yolov8n.pt').export(format='onnx', imgsz=640)"
+mv yolov8n.onnx models/
+```
+
+```env
+PERSON_MODEL_PATH=models/yolov8n.onnx
+```
+
+### Tuning Parameters
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `PERSON_CONFIDENCE_THRESHOLD` | `0.40` | Min confidence to accept a person detection |
+| `UPPER_BODY_CROP_RATIO` | `0.60` | Top fraction of person bbox used as helmet crop |
+| `PERSON_CROP_MARGIN` | `0.05` | Fractional padding added around the crop |
+| `HELMET_RECHECK_INTERVAL` | `5` | Re-run helmet model every N processed frames per track |
+| `PERSON_DETECTION_INTERVAL` | `1` | Run person detector every N processed frames |
+
+### Visual Differences (Video / Live modes)
+
+When person-first is active, each video frame shows:
+- **Thin blue bounding box + P{id} label** around each tracked person.
+- **Standard coloured box** for the helmet/head/non-helmet detection inside the person.
+
+Webcam mode is unchanged (bboxes are drawn client-side by the browser).
+
+---
+
 ## Model Optimization
 
 The model was originally trained as a YOLOv8s PyTorch checkpoint (`.pt`). For cloud deployment it was converted to ONNX format:

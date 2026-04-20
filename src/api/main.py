@@ -23,6 +23,7 @@ from src.api.routes.stream import router as stream_router
 from src.api.routes.update import router as update_router
 from src.config.logging import setup_logging
 from src.config.settings import get_settings
+from src.core.person_detector import get_person_detector
 from src.core.predictor import get_predictor
 from src.core.scheduler import start_scheduler, stop_scheduler
 
@@ -48,13 +49,23 @@ def _cleanup_old_videos(max_age_hours: int = 24) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load the model once on startup and keep the app resilient on failure."""
+    """Load the model(s) once on startup and keep the app resilient on failure."""
     _cleanup_old_videos()
     predictor = get_predictor()
     try:
         predictor.load_model()
     except Exception:
         logger.exception("Model preload failed; health endpoint will report model_loaded=false.")
+
+    if settings.person_first_enabled:
+        try:
+            get_person_detector().load_model()
+            logger.info("Person detector loaded (person-first mode is ON).")
+        except Exception:
+            logger.exception(
+                "Person detector preload failed; person-first pipeline will attempt lazy load."
+            )
+
     start_scheduler()
     yield
     stop_scheduler()
