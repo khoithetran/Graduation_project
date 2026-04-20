@@ -201,22 +201,23 @@ class PersonFirstPipeline:
     def draw_person_boxes(self, frame: np.ndarray) -> None:
         """Draw thin person bounding boxes on *frame* for visual context.
 
-        Call this after ``process_frame`` / ``process_frame_as_boxes`` to
-        overlay person regions on video/live MJPEG frames.
+        Draws ALL detected persons (not only those with a helmet result) so
+        every person in the scene is visually annotated.  Call this after
+        ``process_frame`` / ``process_frame_as_boxes``.
         """
-        for r in self._last_results:
+        for px1, py1, px2, py2, _pconf, track_id in self._last_persons:
             cv2.rectangle(
                 frame,
-                (r.person_x1, r.person_y1),
-                (r.person_x2, r.person_y2),
+                (px1, py1),
+                (px2, py2),
                 _PERSON_BOX_COLOR,
                 1,
             )
-            pid = f"P{r.person_track_id}" if r.person_track_id is not None else "P?"
+            pid = f"P{track_id}" if track_id is not None else "P?"
             cv2.putText(
                 frame,
                 pid,
-                (r.person_x1, max(0, r.person_y1 - 4)),
+                (px1, max(0, py1 - 4)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.4,
                 _PERSON_BOX_COLOR,

@@ -614,6 +614,8 @@ def generate_processed_video_stream(
                                 "Alert stored: video_id=%s total=%d",
                                 video_id, len(VIDEO_ALERTS.get(video_id, [])),
                             )
+                # In person-first mode the person box already shows the track ID,
+                # so suppress it on the helmet box to avoid duplicate ID labels.
                 draw_detection(
                     frame,
                     class_name=class_name,
@@ -622,7 +624,7 @@ def generate_processed_video_stream(
                     y1=y1_i,
                     x2=x2_i,
                     y2=y2_i,
-                    track_id=raw_bt_id,
+                    track_id=None if _person_pipeline is not None else raw_bt_id,
                 )
 
             # Record misses and apply grace-period logic for absent tracks
@@ -750,7 +752,7 @@ def generate_live_stream(live_id: str, predictor: Predictor):
                     y1=y1_i,
                     x2=x2_i,
                     y2=y2_i,
-                    track_id=raw_bt_id,
+                    track_id=None if _person_pipeline is not None else raw_bt_id,
                 )
 
             violation_tracker.tick_absences(violation_hit_ids)
