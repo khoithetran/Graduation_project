@@ -227,6 +227,57 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 
 ---
 
+---
+
+## Phase 8 — Person-First Two-Stage Detection Pipeline ✅
+
+> Cải thiện recall cho người ngồi, cúi người, hoặc bị che khuất một phần bằng cách phát hiện người trước, sau đó chạy model mũ bảo hộ trên từng crop thân trên.
+
+### Backend — Đã triển khai
+
+- [x] `src/core/person_detector.py` — Singleton `PersonDetector`:
+  - `detect_persons()` — chạy YOLOv8n không tracking, lọc COCO class 0, trả về `(x1, y1, x2, y2, conf)`
+  - `track_persons()` — chạy YOLOv8n với ByteTrack, trả về `(x1, y1, x2, y2, conf, track_id)`
+  - Thread-safe qua `Lock`, lazy-load, luôn dùng CPU
+- [x] `src/core/person_first.py` — `PersonFirstPipeline` (per-stream state):
+  - `PersonHelmetResult` dataclass (slots=True) — person bbox + helmet bbox (full-frame coords) + class/conf
+  - `process_frame()` — detect persons → crop upper body → run helmet model → map coords back
+  - `process_frame_as_boxes()` — trả về `(class_name, conf, x1, y1, x2, y2, track_id)` tương thích drop-in với streaming loop hiện có
+  - `draw_person_boxes()` — vẽ bbox xanh mỏng + nhãn P{id} trên video/live frames
+  - Helmet status cache theo `track_id` (hoặc spatial grid key khi không có track) — tái sử dụng kết quả trong `HELMET_RECHECK_INTERVAL` frame
+  - `_purge_stale_cache()` — dọn dẹp entry quá cũ (> 4× recheck interval)
+  - Ưu tiên vi phạm (head/non-helmet) hơn helmet khi chọn detection tốt nhất trong crop
+- [x] `src/config/settings.py` — 6 biến môi trường mới + `@property person_model_path`
+- [x] `src/core/streaming.py` — Tích hợp vào 3 path:
+  - `generate_processed_video_stream()` — tạo `PersonFirstPipeline` per-video-stream; gọi `draw_person_boxes()` sau inference
+  - `generate_live_stream()` — tạo `PersonFirstPipeline` per-live-stream
+  - `process_webcam_frame()` — tạo `PersonFirstPipeline` per-webcam-session (dùng `detect_persons` không tracking)
+  - `_extract_frame_boxes_standard()` — helper normalize ByteTrack output cho pipeline cũ
+- [x] `src/api/main.py` — Preload `PersonDetector` khi startup nếu `PERSON_FIRST_ENABLED=true`
+- [x] Feature flag: `PERSON_FIRST_ENABLED=false` — pipeline cũ hoàn toàn không bị ảnh hưởng
+
+### Cấu hình mới
+
+| Biến | Mặc định | Mô tả |
+|------|---------|-------|
+| `PERSON_FIRST_ENABLED` | `false` | Bật pipeline 2 tầng |
+| `PERSON_MODEL_PATH` | _(auto)_ | Đường dẫn model người; bỏ trống để tự tải `yolov8n.pt` |
+| `PERSON_CONFIDENCE_THRESHOLD` | `0.40` | Ngưỡng confidence phát hiện người |
+| `PERSON_DETECTION_INTERVAL` | `1` | Chạy person detector mỗi N frame (cấu hình xong, chưa áp dụng vào loop) |
+| `HELMET_RECHECK_INTERVAL` | `5` | Tái chạy helmet model mỗi N frame per track |
+| `PERSON_CROP_MARGIN` | `0.05` | Padding xung quanh crop |
+| `UPPER_BODY_CROP_RATIO` | `0.60` | Tỉ lệ phần trên của bbox người dùng làm crop |
+
+### Hạn chế còn lại (chấp nhận được cho demo)
+
+| Hạn chế | Mức độ |
+|---------|--------|
+| `PERSON_DETECTION_INTERVAL` chưa được áp dụng vào streaming loop (person detection chạy mỗi frame) | Thấp |
+| `yolov8n.pt` tự tải lần đầu (~6 MB) — tăng cold-start trên HF Spaces | Thấp |
+| ByteTrack state dùng chung trong singleton tracker khi nhiều session đồng thời | Thấp (demo single-user) |
+
+---
+
 ## Summary of Current State
 
 | Area | Status |
@@ -241,3 +292,4 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 | Deployment files (Docker) | Complete ✅ |
 | Integration testing | Passed ✅ |
 | Tech debt cleanup | Complete ✅ |
+| Person-first two-stage detection pipeline | Complete ✅ |
