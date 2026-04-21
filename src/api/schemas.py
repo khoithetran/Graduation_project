@@ -176,6 +176,16 @@ class WebcamDetectionOut(BaseModel):
     y2: int
 
 
+class PersonBoxOut(BaseModel):
+    """Person bounding box returned when person-first pipeline is active."""
+
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    track_id: Optional[int] = None
+
+
 class LiveAlertOut(BaseModel):
     """Violation alert from a live stream (webcam or IP camera)."""
 
@@ -191,6 +201,7 @@ class WebcamFrameResponse(BaseModel):
 
     detections: list[WebcamDetectionOut]
     alerts: list[LiveAlertOut]
+    person_boxes: list[PersonBoxOut] = Field(default_factory=list)
 
 
 class AlertReportRequest(BaseModel):

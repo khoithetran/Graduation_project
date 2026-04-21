@@ -12,6 +12,7 @@ from src.api.rate_limit import limiter
 from src.api.schemas import (
     LiveAlertOut,
     LiveStartResponse,
+    PersonBoxOut,
     UploadVideoResponse,
     VideoDetectResponse,
     WebcamFrameResponse,
@@ -104,11 +105,17 @@ def stream_video(
     file_name: str = Query(...),
     source: str | None = Query(None),
     start_sec: float = Query(0.0),
+    classes: str | None = Query(None, description="Comma-separated class names to draw; omit for all"),
+    person_first: bool = Query(False, description="Use two-stage person-first detection pipeline"),
 ) -> StreamingResponse:
     """Stream a processed uploaded video as MJPEG."""
     video_path = settings.videos_dir / f"{video_id}__{Path(file_name).name}"
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="Uploaded video was not found.")
+
+    filter_classes: set[str] | None = None
+    if classes:
+        filter_classes = {c.strip() for c in classes.split(",") if c.strip()}
 
     predictor = get_predictor()
     stream = generate_processed_video_stream(
@@ -117,6 +124,8 @@ def stream_video(
         source=source or file_name,
         video_id=video_id,
         start_sec=start_sec,
+        filter_classes=filter_classes,
+        person_first=person_first,
     )
     return StreamingResponse(stream, media_type="multipart/x-mixed-replace; boundary=frame")
 
@@ -134,14 +143,21 @@ async def live_start(
 
 
 @router.get("/api/live/stream")
-def live_stream(live_id: str = Query(...)) -> StreamingResponse:
+def live_stream(
+    live_id: str = Query(...),
+    classes: str | None = Query(None, description="Comma-separated class names to draw; omit for all"),
+) -> StreamingResponse:
     """Stream a registered live source as MJPEG."""
     if live_id not in LIVE_STREAMS:
         raise HTTPException(status_code=404, detail="Live stream was not found.")
 
+    filter_classes: set[str] | None = None
+    if classes:
+        filter_classes = {c.strip() for c in classes.split(",") if c.strip()}
+
     predictor = get_predictor()
     try:
-        stream = generate_live_stream(live_id=live_id, predictor=predictor)
+        stream = generate_live_stream(live_id=live_id, predictor=predictor, filter_classes=filter_classes)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return StreamingResponse(stream, media_type="multipart/x-mixed-replace; boundary=frame")
@@ -153,6 +169,7 @@ async def live_webcam_frame(
     request: Request,
     file: UploadFile = File(...),
     session_id: str = Form(...),
+    person_first: bool = Form(False),
 ) -> WebcamFrameResponse:
     """Process a single webcam frame and return detections + any new violation alerts."""
     predictor = get_predictor()
@@ -161,10 +178,12 @@ async def live_webcam_frame(
         frame_bytes=raw_bytes,
         session_id=session_id,
         predictor=predictor,
+        person_first=person_first,
     )
     return WebcamFrameResponse(
         detections=result["detections"],
         alerts=result["alerts"],
+        person_boxes=[PersonBoxOut(**pb) for pb in result.get("person_boxes", [])],
     )
 
 
