@@ -43,6 +43,9 @@ COPY backend ./backend
 # Runtime data directories (actual files are mounted via volume in production)
 COPY models ./models
 
+# Demo assets for the landing page
+COPY demo ./demo
+
 # Copy built frontend from Stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
