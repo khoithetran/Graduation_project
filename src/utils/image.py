@@ -74,19 +74,34 @@ def draw_detection(
 ) -> None:
     """Draw a labeled detection box on a frame."""
     color = detection_color(class_name)
-    label = f"{class_name} {confidence:.2f}"
+    label = f"{class_name} {confidence * 100:.1f}%"
     if track_id is not None:
         label = f"ID {track_id} | {label}"
 
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+    fh, fw = frame.shape[:2]
+    thickness = max(2, fw // 400)
+    font_scale = max(0.5, fw / 1000)
+    font_thickness = max(1, thickness - 1)
+
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+
+    (text_w, text_h), baseline = cv2.getTextSize(
+        label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness
+    )
+    pad = max(3, fw // 300)
+    label_y = y1 - pad if y1 > text_h + pad * 2 else y2 + text_h + pad
+    bg_x2 = min(fw, x1 + text_w + pad * 2)
+    bg_y1 = max(0, label_y - text_h - pad)
+    bg_y2 = min(fh, label_y + baseline + pad // 2)
+    cv2.rectangle(frame, (x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
     cv2.putText(
         frame,
         label,
-        (x1, max(0, y1 - 5)),
+        (x1 + pad, label_y),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
+        font_scale,
         color,
-        1,
+        font_thickness,
         cv2.LINE_AA,
     )
 
