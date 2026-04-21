@@ -92,6 +92,11 @@ app.add_middleware(
 # ── Runtime data (history images, uploaded videos) ───────────────────────────
 app.mount("/static", StaticFiles(directory=settings.data_dir), name="static")
 
+# ── Demo assets (served for the landing page demo images) ────────────────────
+_DEMO_DIR = Path(__file__).resolve().parents[2] / "demo"
+if _DEMO_DIR.exists():
+    app.mount("/demo", StaticFiles(directory=_DEMO_DIR), name="demo")
+
 # ── API routers (must be registered before the SPA catch-all) ────────────────
 app.include_router(inference_router)
 app.include_router(history_router)

@@ -5,8 +5,7 @@ import { ImageDetection } from './components/ImageDetection';
 import { VideoTracking } from './components/VideoTracking';
 import { LiveStream } from './components/LiveStream';
 
-// Demo image — imported as Vite static asset (bundled into dist/assets/)
-import demo1 from '../../demo/image_demo_1.jpg';
+const demo1 = '/demo/image_demo_1.jpg';
 
 type Tab = 'image' | 'video' | 'live';
 
