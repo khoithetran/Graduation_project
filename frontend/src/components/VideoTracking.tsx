@@ -9,8 +9,25 @@ import { AlertDetailModal } from './AlertDetailModal';
 import { ReportModal } from './ReportModal';
 import { LoadingOverlay } from './LoadingOverlay';
 
-export function VideoTracking() {
+// Standard helmet-model classes + optional person class
+const HELMET_CLASSES = ['helmet', 'head', 'non-helmet'] as const;
+const CLASS_LABELS: Record<string, string> = {
+  helmet: appText.bboxControls.classHelmet,
+  head: appText.bboxControls.classHead,
+  'non-helmet': appText.bboxControls.classNonHelmet,
+  person: appText.bboxControls.classPerson,
+};
+
+type VideoState = 'idle' | 'uploaded' | 'streaming';
+
+interface Props {
+  personFirst: boolean;
+}
+
+export function VideoTracking({ personFirst }: Props) {
+  const [videoState, setVideoState] = useState<VideoState>('idle');
   const [videoId, setVideoId] = useState<string | null>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
   const [streamUrl, setStreamUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [statusMessage, setStatusMessage] = useState(appText.videoTracking.defaultStatus);
@@ -21,11 +38,26 @@ export function VideoTracking() {
   const [reportAlert, setReportAlert] = useState<VideoAlert | null>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
+  // Class filter — default all on; person added when personFirst is active
+  const availableClasses = personFirst
+    ? [...HELMET_CLASSES, 'person']
+    : [...HELMET_CLASSES];
+  const [activeClasses, setActiveClasses] = useState<Set<string>>(new Set(availableClasses));
+  // Snapshot of activeClasses at the moment stream was started — used for badge display and alert filtering
+  const [streamActiveClasses, setStreamActiveClasses] = useState<Set<string>>(new Set());
+
+  // Sync availableClasses into activeClasses when personFirst changes (pre-start only)
+  useEffect(() => {
+    if (videoState !== 'streaming') {
+      setActiveClasses(new Set(personFirst ? [...HELMET_CLASSES, 'person'] : [...HELMET_CLASSES]));
+    }
+  }, [personFirst, videoState]);
+
   const imgRef = useRef<HTMLImageElement>(null);
 
-  // Poll for alerts while a video is streaming
+  // Poll for alerts while streaming
   useEffect(() => {
-    if (!videoId || !streamUrl) return;
+    if (!videoId || videoState !== 'streaming') return;
 
     let cancelled = false;
 
@@ -33,12 +65,16 @@ export function VideoTracking() {
       try {
         const res = await fetch(
           `${API_BASE}/api/stream/video/alerts?video_id=${encodeURIComponent(videoId)}`,
-          { cache: 'no-store' },   // prevent browser caching stale responses
+          { cache: 'no-store' },
         );
         if (!res.ok) return;
         const data = (await res.json()) as VideoAlert[];
         if (!cancelled) {
-          setAlerts(data);
+          setAlerts(
+            streamActiveClasses.size > 0
+              ? data.filter((a) => streamActiveClasses.has(a.class_name))
+              : data,
+          );
         }
       } catch {
         // ignore poll errors silently
@@ -46,15 +82,16 @@ export function VideoTracking() {
     };
 
     poll();
-    const id = window.setInterval(poll, 1000);   // 1 s for faster feedback
+    const id = window.setInterval(poll, 1000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [videoId, streamUrl]);
+  }, [videoId, videoState]);
 
   const handleStreamError = () => {
     setStreamUrl(null);
+    setVideoState('idle');
     setStatusMessage(appText.videoTracking.failure);
   };
 
@@ -64,10 +101,12 @@ export function VideoTracking() {
 
     setIsUploading(true);
     setStreamUrl(null);
+    setVideoState('idle');
     setIsPaused(false);
     setFrozenFrame(null);
     setAlerts([]);
     setVideoId(null);
+    setFileName(null);
     setStatusMessage(appText.videoTracking.uploadLoading);
 
     try {
@@ -80,9 +119,9 @@ export function VideoTracking() {
         file_name: string;
       };
       setVideoId(video_id);
-      const url = `${API_BASE}/api/stream/video?video_id=${encodeURIComponent(video_id)}&file_name=${encodeURIComponent(file_name)}`;
-      setStreamUrl(url);
-      setStatusMessage(appText.videoTracking.streamingStatus);
+      setFileName(file_name);
+      setVideoState('uploaded');
+      setStatusMessage(appText.videoTracking.uploadedReady);
     } catch {
       setStatusMessage(appText.videoTracking.failure);
     } finally {
@@ -91,12 +130,30 @@ export function VideoTracking() {
     }
   };
 
+  const handleStartDetection = () => {
+    if (!videoId || !fileName) return;
+    const classParam = [...activeClasses].join(',');
+    const url =
+      `${API_BASE}/api/stream/video` +
+      `?video_id=${encodeURIComponent(videoId)}` +
+      `&file_name=${encodeURIComponent(fileName)}` +
+      `&classes=${encodeURIComponent(classParam)}` +
+      `&person_first=${personFirst}`;
+    setStreamActiveClasses(new Set(activeClasses));
+    setStreamUrl(url);
+    setVideoState('streaming');
+    setStatusMessage(appText.videoTracking.streamingStatus);
+  };
+
   const handleClear = () => {
     setStreamUrl(null);
     setIsPaused(false);
     setFrozenFrame(null);
     setAlerts([]);
     setVideoId(null);
+    setFileName(null);
+    setStreamActiveClasses(new Set());
+    setVideoState('idle');
     setStatusMessage(appText.videoTracking.defaultStatus);
   };
 
@@ -118,6 +175,18 @@ export function VideoTracking() {
       setFrozenFrame(null);
     }
     setIsPaused((p) => !p);
+  };
+
+  const toggleClass = (cls: string) => {
+    setActiveClasses((prev) => {
+      const next = new Set(prev);
+      if (next.has(cls)) {
+        next.delete(cls);
+      } else {
+        next.add(cls);
+      }
+      return next;
+    });
   };
 
   const handleAlertClick = (alert: VideoAlert) => {
@@ -157,12 +226,46 @@ export function VideoTracking() {
     }
   };
 
+  // ── Render helpers ─────────────────────────────────────────────────────────
+
+  const ClassFilterPanel = () => (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-stone-300">{appText.bboxControls.filterLabel}</p>
+        <p className="text-[10px] text-stone-500">{appText.detection.filterPresetNote}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {availableClasses.map((cls) => {
+          const active = activeClasses.has(cls);
+          const color = getColor(cls);
+          return (
+            <button
+              key={cls}
+              onClick={() => toggleClass(cls)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                active
+                  ? 'border-white/20 bg-white/10 text-stone-100'
+                  : 'border-white/5 bg-stone-950/50 text-stone-500'
+              }`}
+            >
+              <span
+                className="h-2 w-2 rounded-full flex-shrink-0"
+                style={{ backgroundColor: active ? color : '#525252' }}
+              />
+              {CLASS_LABELS[cls]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   return (
     <div className="space-y-6">
       {/* Status bar */}
-      {streamUrl && (
+      {videoState !== 'idle' && (
         <p className="text-sm text-stone-300">
-          {isPaused ? 'Paused' : statusMessage}
+          {videoState === 'streaming' && isPaused ? 'Paused' : statusMessage}
         </p>
       )}
 
@@ -171,7 +274,7 @@ export function VideoTracking() {
         <div className="relative aspect-video overflow-hidden rounded-[1.75rem] border border-white/10 bg-stone-950">
           <LoadingOverlay label={appText.videoTracking.uploadLoading} />
         </div>
-      ) : streamUrl ? (
+      ) : videoState === 'streaming' && streamUrl ? (
         <div className="overflow-hidden rounded-[1.75rem] border bg-stone-950 border-white/10 transition">
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <p className="text-sm font-semibold text-white">{appText.videoTracking.sectionTitle}</p>
@@ -179,6 +282,23 @@ export function VideoTracking() {
               ByteTrack
             </span>
           </div>
+          {streamActiveClasses.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] px-4 py-2">
+              <span className="text-[10px] text-stone-500">{appText.bboxControls.activeFilterLabel}</span>
+              {[...streamActiveClasses].map((cls) => {
+                const color = getColor(cls);
+                return (
+                  <span
+                    key={cls}
+                    className="flex items-center gap-1 rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-stone-200"
+                  >
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                    {CLASS_LABELS[cls]}
+                  </span>
+                );
+              })}
+            </div>
+          )}
 
           <div className="group relative cursor-pointer" onClick={togglePause}>
             <img
@@ -229,7 +349,40 @@ export function VideoTracking() {
             </div>
           </div>
         </div>
+      ) : videoState === 'uploaded' ? (
+        /* ── Uploaded: filter + start ─── */
+        <div className="overflow-hidden rounded-[1.75rem] border border-amber-400/20 bg-stone-950">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <p className="text-sm font-semibold text-white">{appText.videoTracking.sectionTitle}</p>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs text-amber-200">
+                {appText.videoTracking.uploadedReady.split('.')[0]}
+              </span>
+              <button
+                onClick={handleClear}
+                aria-label="Remove video"
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-900/80 text-stone-400 backdrop-blur transition hover:bg-red-500 hover:text-white"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div className="space-y-4 p-5">
+            <p className="text-sm text-stone-400">{appText.videoTracking.uploadedReady}</p>
+            <ClassFilterPanel />
+            <button
+              onClick={handleStartDetection}
+              disabled={activeClasses.size === 0}
+              className="w-full rounded-2xl bg-amber-300 py-3 text-sm font-bold text-stone-950 transition hover:bg-amber-200 disabled:opacity-40"
+            >
+              {appText.detection.startButton}
+            </button>
+          </div>
+        </div>
       ) : (
+        /* ── Idle: upload zone ─── */
         <label className="flex aspect-video cursor-pointer flex-col items-center justify-center gap-4 overflow-hidden rounded-[1.75rem] border border-dashed border-white/10 bg-stone-950 transition hover:border-amber-400/40 hover:bg-stone-900/60">
           <div className="flex h-14 w-14 items-center justify-center rounded-full border border-white/10 bg-white/5">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6 text-amber-300">
@@ -277,16 +430,9 @@ export function VideoTracking() {
                       : 'border-white/10 bg-stone-950/70 hover:border-white/20 hover:bg-stone-900/80'
                   }`}
                 >
-                  {/* Crop image */}
                   <div className="overflow-hidden rounded-t-[1.25rem] bg-stone-900">
-                    <img
-                      src={alert.crop}
-                      alt={alert.class_name}
-                      className="h-36 w-full object-contain"
-                    />
+                    <img src={alert.crop} alt={alert.class_name} className="h-36 w-full object-contain" />
                   </div>
-
-                  {/* Info row */}
                   <div className="flex items-center justify-between gap-3 p-4">
                     <div>
                       <p className="text-sm font-semibold uppercase tracking-[0.2em]" style={{ color }}>

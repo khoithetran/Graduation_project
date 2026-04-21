@@ -251,7 +251,13 @@ def _extract_frame_boxes_standard(
     for i in range(len(boxes)):
         box = boxes[i]
         class_id = int(box.cls[0].item())
-        class_name = str(result.names.get(class_id, str(class_id)))
+        raw_name = str(result.names.get(class_id, str(class_id)))
+        if is_head_class(raw_name):
+            class_name = "head"
+        elif is_nonhelmet_class(raw_name):
+            class_name = "non-helmet"
+        else:
+            class_name = "helmet"
         confidence = float(box.conf[0].item())
         x1, y1, x2, y2 = box.xyxy[0].tolist()
         x1_i, y1_i, x2_i, y2_i = clamp_bbox(x1, y1, x2, y2, width=width, height=height)
@@ -285,6 +291,7 @@ def process_webcam_frame(
     frame_bytes: bytes,
     session_id: str,
     predictor: Predictor,
+    person_first: bool = False,
 ) -> dict:
     """Process a single JPEG webcam frame and return detections + any new alerts.
 
@@ -306,7 +313,7 @@ def process_webcam_frame(
         if len(WEBCAM_SESSIONS) >= _MAX_WEBCAM_SESSIONS:
             WEBCAM_SESSIONS.popitem(last=False)
         sess = _WebcamSession()
-        if settings.person_first_enabled:
+        if settings.person_first_enabled or person_first:
             sess.person_pipeline = make_person_first_pipeline()
         WEBCAM_SESSIONS[session_id] = sess
 
@@ -328,7 +335,7 @@ def process_webcam_frame(
     new_alerts: list[dict] = []
     violation_hit_ids: set[int] = set()
 
-    if settings.person_first_enabled and session.person_pipeline is not None:
+    if session.person_pipeline is not None:
         frame_boxes = session.person_pipeline.process_frame_as_boxes(
             frame, use_tracking=False
         )
@@ -345,13 +352,19 @@ def process_webcam_frame(
             if result.boxes is not None:
                 for box in result.boxes:
                     class_id = int(box.cls[0].item())
-                    class_name = str(result.names.get(class_id, str(class_id)))
+                    raw_name = str(result.names.get(class_id, str(class_id)))
+                    if is_head_class(raw_name):
+                        class_name = "head"
+                    elif is_nonhelmet_class(raw_name):
+                        class_name = "non-helmet"
+                    else:
+                        class_name = "helmet"
                     confidence = float(box.conf[0].item())
                     x1, y1, x2, y2 = box.xyxy[0].tolist()
                     x1_i, y1_i, x2_i, y2_i = clamp_bbox(x1, y1, x2, y2, width=width, height=height)
                     if x2_i - x1_i <= 1 or y2_i - y1_i <= 1:
                         continue
-                    frame_boxes.append((class_name, float(box.conf[0].item()), x1_i, y1_i, x2_i, y2_i, None))
+                    frame_boxes.append((class_name, confidence, x1_i, y1_i, x2_i, y2_i, None))
 
     for class_name, confidence, x1_i, y1_i, x2_i, y2_i, _track_id in frame_boxes:
         detections_out.append({
@@ -386,7 +399,16 @@ def process_webcam_frame(
 
     session.tracker.tick_absences(violation_hit_ids)
 
-    return {"detections": detections_out, "alerts": new_alerts}
+    # Collect person boxes when person-first pipeline is active
+    person_boxes_out: list[dict] = []
+    if session.person_pipeline is not None:
+        for px1, py1, px2, py2, _pconf, track_id in session.person_pipeline._last_persons:
+            person_boxes_out.append({
+                "x1": px1, "y1": py1, "x2": px2, "y2": py2,
+                "track_id": track_id,
+            })
+
+    return {"detections": detections_out, "alerts": new_alerts, "person_boxes": person_boxes_out}
 
 
 def register_uploaded_video(filename: str, raw_bytes: bytes) -> UploadVideoResponse:
@@ -507,6 +529,8 @@ def generate_processed_video_stream(
     source: str,
     video_id: str,
     start_sec: float = 0.0,
+    filter_classes: set[str] | None = None,
+    person_first: bool = False,
 ):
     """Yield an MJPEG stream for a processed video file using ByteTrack."""
     cap = cv2.VideoCapture(str(video_path))
@@ -539,9 +563,9 @@ def generate_processed_video_stream(
     _reset_video_alerts(video_id)
     violation_tracker = _ViolationTracker()
 
-    # Create a fresh person-first pipeline instance for this stream (if enabled)
+    # Create a fresh person-first pipeline instance when requested by the caller
     _person_pipeline: PersonFirstPipeline | None = None
-    if settings.person_first_enabled:
+    if person_first:
         _person_pipeline = make_person_first_pipeline()
 
     try:
@@ -565,7 +589,9 @@ def generate_processed_video_stream(
                 frame_boxes = _person_pipeline.process_frame_as_boxes(
                     frame, use_tracking=True
                 )
-                _person_pipeline.draw_person_boxes(frame)
+                # Draw person boxes unless explicitly excluded by class filter
+                if filter_classes is None or "person" in filter_classes:
+                    _person_pipeline.draw_person_boxes(frame)
             else:
                 frame_boxes = _extract_frame_boxes_standard(
                     frame, predictor, _VIDEO_TRACKER_CFG, processed_idx
@@ -597,35 +623,38 @@ def generate_processed_video_stream(
                             "Alert triggered: resolved_id=%d class=%s t=%.2fs",
                             resolved_id, class_name, timestamp_sec,
                         )
-                        crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
-                        if crop_data:
-                            _append_video_alert(video_id, {
-                                "id": uuid.uuid4().hex,
-                                "timestamp_sec": round(timestamp_sec, 2),
-                                "class_name": class_name,
-                                "confidence": round(confidence, 4),
-                                "crop": crop_data,
-                                "x1": x1_i,
-                                "y1": y1_i,
-                                "x2": x2_i,
-                                "y2": y2_i,
-                            })
-                            logger.debug(
-                                "Alert stored: video_id=%s total=%d",
-                                video_id, len(VIDEO_ALERTS.get(video_id, [])),
-                            )
-                # In person-first mode the person box already shows the track ID,
-                # so suppress it on the helmet box to avoid duplicate ID labels.
-                draw_detection(
-                    frame,
-                    class_name=class_name,
-                    confidence=confidence,
-                    x1=x1_i,
-                    y1=y1_i,
-                    x2=x2_i,
-                    y2=y2_i,
-                    track_id=None if _person_pipeline is not None else raw_bt_id,
-                )
+                        if filter_classes is None or class_name in filter_classes:
+                            crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
+                            if crop_data:
+                                _append_video_alert(video_id, {
+                                    "id": uuid.uuid4().hex,
+                                    "timestamp_sec": round(timestamp_sec, 2),
+                                    "class_name": class_name,
+                                    "confidence": round(confidence, 4),
+                                    "crop": crop_data,
+                                    "x1": x1_i,
+                                    "y1": y1_i,
+                                    "x2": x2_i,
+                                    "y2": y2_i,
+                                })
+                                logger.debug(
+                                    "Alert stored: video_id=%s total=%d",
+                                    video_id, len(VIDEO_ALERTS.get(video_id, [])),
+                                )
+                # Only draw if class passes the filter
+                if filter_classes is None or class_name in filter_classes:
+                    # In person-first mode the person box already shows the track ID,
+                    # so suppress it on the helmet box to avoid duplicate ID labels.
+                    draw_detection(
+                        frame,
+                        class_name=class_name,
+                        confidence=confidence,
+                        x1=x1_i,
+                        y1=y1_i,
+                        x2=x2_i,
+                        y2=y2_i,
+                        track_id=None if _person_pipeline is not None else raw_bt_id,
+                    )
 
             # Record misses and apply grace-period logic for absent tracks
             violation_tracker.tick_absences(violation_hit_ids)
@@ -676,7 +705,7 @@ def generate_processed_video_stream(
         cap.release()
 
 
-def generate_live_stream(live_id: str, predictor: Predictor):
+def generate_live_stream(live_id: str, predictor: Predictor, filter_classes: set[str] | None = None):
     """Yield an MJPEG stream for a registered live source using ByteTrack."""
     live_cfg = LIVE_STREAMS.get(live_id)
     if live_cfg is None:
@@ -716,7 +745,8 @@ def generate_live_stream(live_id: str, predictor: Predictor):
                 frame_boxes = _person_pipeline.process_frame_as_boxes(
                     frame, use_tracking=True
                 )
-                _person_pipeline.draw_person_boxes(frame)
+                if filter_classes is None or "person" in filter_classes:
+                    _person_pipeline.draw_person_boxes(frame)
             else:
                 frame_boxes = _extract_frame_boxes_standard(
                     frame, predictor, _VIDEO_TRACKER_CFG, frame_idx
@@ -734,26 +764,28 @@ def generate_live_stream(live_id: str, predictor: Predictor):
                         logger.info(
                             "Live alert: live_id=%s class=%s", live_id, class_name
                         )
-                        crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
-                        if crop_data:
-                            _append_live_alert(live_id, {
-                                "id": uuid.uuid4().hex,
-                                "wall_time": datetime.now().strftime("%H:%M:%S"),
-                                "class_name": class_name,
-                                "confidence": round(confidence, 4),
-                                "crop": crop_data,
-                            })
+                        if filter_classes is None or class_name in filter_classes:
+                            crop_data = _crop_b64(frame, x1_i, y1_i, x2_i, y2_i)
+                            if crop_data:
+                                _append_live_alert(live_id, {
+                                    "id": uuid.uuid4().hex,
+                                    "wall_time": datetime.now().strftime("%H:%M:%S"),
+                                    "class_name": class_name,
+                                    "confidence": round(confidence, 4),
+                                    "crop": crop_data,
+                                })
 
-                draw_detection(
-                    frame,
-                    class_name=class_name,
-                    confidence=confidence,
-                    x1=x1_i,
-                    y1=y1_i,
-                    x2=x2_i,
-                    y2=y2_i,
-                    track_id=None if _person_pipeline is not None else raw_bt_id,
-                )
+                if filter_classes is None or class_name in filter_classes:
+                    draw_detection(
+                        frame,
+                        class_name=class_name,
+                        confidence=confidence,
+                        x1=x1_i,
+                        y1=y1_i,
+                        x2=x2_i,
+                        y2=y2_i,
+                        track_id=None if _person_pipeline is not None else raw_bt_id,
+                    )
 
             violation_tracker.tick_absences(violation_hit_ids)
 

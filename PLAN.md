@@ -313,10 +313,55 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 
 ---
 
+---
+
+## Phase 10 — Filter Sync, Webcam Class Normalization & Active Filter UI ✅
+
+> Sửa ba nhóm lỗi phát sinh sau Phase 8–9: violation alert không bám theo filter đã chọn, webcam không hiện person box khi bật Person-First từ frontend, và thiếu hiển thị class đang dùng sau khi bắt đầu nhận dạng.
+
+### Nguyên nhân gốc
+
+| Lỗi | Nguyên nhân |
+|-----|------------|
+| Alert video/IP cam hiện sai class | `_append_video_alert` / `_append_live_alert` được gọi trước khi kiểm tra `filter_classes` — filter chỉ bảo vệ `draw_detection`, không bảo vệ alert |
+| Alert webcam hiện sai class | Frontend không gửi `activeClasses` lên backend; backend tạo alert cho mọi class; frontend add toàn bộ vào state |
+| Webcam standard path: filter không khớp | Class name không được normalize (`"Safety Helmet"` thay vì `"helmet"`) → `activeClasses.has(det.class_name)` không match được → box không hiện dù filter đúng |
+| Webcam Person-First không hoạt động | `personFirst` từ frontend không được gửi trong POST frame → session không tạo `PersonFirstPipeline` → không có person boxes |
+| Person-First condition sai | `if settings.person_first_enabled and session.person_pipeline is not None:` — khi env var tắt nhưng pipeline được tạo qua frontend flag, condition vẫn bỏ qua pipeline |
+| Không thấy class đang lọc sau khi start | Video và webcam không hiển thị badge/chip nào sau khi bấm bắt đầu nhận dạng |
+
+### Backend — Đã sửa
+
+- [x] `src/core/streaming.py` — `generate_processed_video_stream()`: thêm `if filter_classes is None or class_name in filter_classes:` bao quanh block `_append_video_alert()`
+- [x] `src/core/streaming.py` — `generate_live_stream()`: thêm cùng guard trước `_append_live_alert()`
+- [x] `src/core/streaming.py` — `process_webcam_frame()` standard path: normalize raw class name qua `is_head_class` / `is_nonhelmet_class` → `"head"` / `"non-helmet"` / `"helmet"` (nhất quán với `_extract_frame_boxes_standard`)
+- [x] `src/core/streaming.py` — `process_webcam_frame()`: nhận thêm `person_first: bool = False`; tạo `PersonFirstPipeline` khi `settings.person_first_enabled OR person_first`; đổi condition dùng pipeline sang `if session.person_pipeline is not None:` (bỏ check env var thừa)
+- [x] `src/api/routes/stream.py` — Endpoint `POST /api/live/webcam/frame`: thêm `person_first: bool = Form(False)`, truyền xuống `process_webcam_frame()`
+
+### Frontend — Đã sửa
+
+- [x] `frontend/src/components/LiveStream.tsx` — Thêm `person_first` vào `FormData` khi POST frame; filter `data.alerts` bằng `activeClassesRef.current` trước khi add vào state; thêm badge strip hiển thị class đang active khi `isLiveActive`
+- [x] `frontend/src/components/VideoTracking.tsx` — Thêm `streamActiveClasses` state (snapshot tại `handleStartDetection`); thêm badge strip dưới header khi `videoState === 'streaming'`; filter alerts từ poll theo `streamActiveClasses`
+- [x] `frontend/src/content/app-text.vi.json` — Thêm `bboxControls.activeFilterLabel: "Đang lọc:"`
+
+### Hành vi mới
+
+| Tình huống | Trước | Sau |
+|-----------|-------|-----|
+| Video, chọn chỉ `helmet` | Alert vẫn báo `head` + `non-helmet` | Alert chỉ báo `helmet` |
+| IP Camera, chọn chỉ `non-helmet` | Alert vẫn báo tất cả vi phạm | Alert chỉ báo `non-helmet` |
+| Webcam, chọn chỉ `helmet` | Alert vẫn báo `head` + `non-helmet` | Alert chỉ báo `helmet` |
+| Webcam, bật Person-First từ UI toggle | Không có person boxes | Person boxes xuất hiện khi chọn filter `person` |
+| Webcam standard path | Box có thể không match filter nếu model dùng raw class name | Class name được normalize, filter hoạt động đúng |
+| Sau khi bấm bắt đầu | Không biết filter nào đang dùng | Badge strip hiển thị rõ các class đang active |
+
+---
+
 ## Summary of Current State
 
 | Area | Status |
 |---|---|
+| Frontend light-theme refresh (`#9fe7f5` + explainers for 3 demo modes + demo showcase + accurate pipeline wording + person-first callout card) | Complete ✅ |
 | Backend infrastructure (`src/`) | Complete ✅ |
 | FastAPI routes (5 routers) | Complete ✅ |
 | Frontend components | Complete ✅ — 3 tabs: Image, Video, LiveStream |
@@ -329,3 +374,4 @@ Migrate the graduation project from a monolithic script-based repository (`backe
 | Tech debt cleanup | Complete ✅ |
 | Person-first two-stage detection pipeline | Complete ✅ |
 | Performance optimizations & UI loading UX | Complete ✅ |
+| Filter sync, webcam normalization & active filter UI | Complete ✅ |

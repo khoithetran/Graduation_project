@@ -176,13 +176,18 @@ PERSON_MODEL_PATH=models/yolov8n.onnx
 | `HELMET_RECHECK_INTERVAL` | `5` | Re-run helmet model every N processed frames per track |
 | `PERSON_DETECTION_INTERVAL` | `1` | Run person detector every N processed frames — default=1 (every frame, full accuracy); set to 2–4 on weak CPU to halve person-model calls at the cost of brief lag when a new person enters |
 
-### Visual Differences (Video / Live modes)
+### Visual Differences
 
-When person-first is active, each video frame shows:
+When person-first is active:
+
+**Video / IP Camera modes** (MJPEG overlay drawn server-side):
 - **Thin blue bounding box + P{id} label** around each tracked person.
 - **Standard coloured box** for the helmet/head/non-helmet detection inside the person.
 
-Webcam mode is unchanged (bboxes are drawn client-side by the browser).
+**Webcam mode** (bboxes drawn client-side by the browser):
+- Toggle the **Person-First** switch in the UI — the frontend sends `person_first=true` with every frame.
+- Backend creates a per-session `PersonFirstPipeline` and returns `person_boxes` alongside normal detections.
+- Selecting the **Person** filter chip shows the thin orange person bounding boxes on the canvas overlay.
 
 ---
 
@@ -375,7 +380,7 @@ Then set `PERSON_MODEL_PATH=models/yolov8n.onnx`. The backend auto-detects the f
 ---
 
 ## Engineering Notes
-
+- **Frontend demo refresh (2025-04)** — UI shifted to a light `#9fe7f5`-led visual system with DM Sans throughout. Hero shows a single-line title + 4 stat cards; a 5-step pipeline diagram accurately describes the default single-stage flow with a note that ByteTrack/rolling-window (step 4) is Video/Live only; a dedicated callout card inside the pipeline section explains the person-first 2-stage variant (YOLOv8n → crop → YOLOv8s) and clarifies it is opt-in via `PERSON_FIRST_ENABLED=true` and applies to Video, Live Stream, and Webcam — not image-only requests; real demo images are embedded as a showcase section; three mode-selector cards explain each detection mode. Existing component functionality unchanged.
 - **Singleton model loader** — the ONNX model is loaded once at startup and reused across all requests; no per-request overhead.
 - **Same-origin deployment** — on Hugging Face Spaces, React static files are served by FastAPI itself, so all API calls use relative paths with no hardcoded URLs or CORS issues.
 - **ByteTrack confirmation window** — violations are only alerted after a rolling 3-of-5 frame window, eliminating single-frame false positives.
@@ -384,3 +389,6 @@ Then set `PERSON_MODEL_PATH=models/yolov8n.onnx`. The backend auto-detects the f
 - **Gemini rate limiter** — a global threading lock enforces ≤12 calls/minute (safely under the free-tier 15 RPM limit); in-flight deduplication prevents redundant calls for the same alert.
 - **Instant PDF** — `POST /api/report/simple-pdf` accepts raw alert data from the frontend and builds a PDF immediately without history lookup or LLM calls; image aspect ratios are preserved.
 - **Runtime data isolation** — detection history and uploaded videos are written to `/app/data` inside the container (gitignored); only the model weights and source code are version-controlled.
+- **Filter-aware violation alerts** — the `classes` URL parameter passed at stream start is applied to both the visual overlay and the alert store; only classes matching the user's filter selection are saved in `VIDEO_ALERTS` / `LIVE_ALERTS`, so polled alerts are already pre-filtered. For webcam, the frontend filters `data.alerts` client-side using the active class set before adding to state.
+- **Per-session person-first (webcam)** — `person_first` is sent as a form field with every webcam frame POST. A new session initialises a `PersonFirstPipeline` when `person_first=true` regardless of the global `PERSON_FIRST_ENABLED` env var, so the UI toggle works independently of server configuration.
+- **Active filter indicator** — after clicking "Bắt đầu nhận dạng" on Video or Webcam, a badge strip appears beneath the stream header listing every class currently being filtered, so the active filter is always visible during inference.

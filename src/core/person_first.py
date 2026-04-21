@@ -282,7 +282,13 @@ class PersonFirstPipeline:
 
         for box in result.boxes:
             class_id = int(box.cls[0].item())
-            class_name = str(result.names.get(class_id, str(class_id)))
+            raw_name = str(result.names.get(class_id, str(class_id)))
+            if is_head_class(raw_name):
+                class_name = "head"
+            elif is_nonhelmet_class(raw_name):
+                class_name = "non-helmet"
+            else:
+                class_name = "helmet"
             conf = float(box.conf[0].item())
             bx1, by1, bx2, by2 = box.xyxy[0].tolist()
             bx1_i, by1_i, bx2_i, by2_i = clamp_bbox(bx1, by1, bx2, by2, width=cw, height=ch)

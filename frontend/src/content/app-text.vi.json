@@ -4,6 +4,67 @@
     "apiLabel": "API",
     "detectionsLabel": "Kết quả nhận diện"
   },
+  "hero": {
+    "badge": "Hệ thống AI An toàn Lao động",
+    "title": "Nhận diện mũ bảo hộ thông minh",
+    "subtitle": "Triển khai AI phát hiện vi phạm trang bị bảo hộ cá nhân trên công trường — xử lý ảnh, video và luồng camera trực tiếp với YOLOv8 ONNX Runtime, không cần GPU.",
+    "stat1Label": "Đầu vào hỗ trợ",
+    "stat1Value": "Ảnh · Video · Webcam · IP Cam",
+    "stat2Label": "Tốc độ xử lý",
+    "stat2Value": "~90 ms / ảnh (CPU)",
+    "stat3Label": "Đầu ra nhận diện",
+    "stat3Value": "BBox · Class · Confidence",
+    "stat4Label": "Theo dõi vi phạm",
+    "stat4Value": "ByteTrack + Cảnh báo AI"
+  },
+  "pipeline": {
+    "sectionTitle": "Quy trình hoạt động",
+    "sectionSubtitle": "Pipeline mặc định dùng cho cả 3 chế độ. Bước 4 (theo dõi) chỉ áp dụng cho Video và Live Stream — không áp dụng cho nhận diện ảnh đơn lẻ.",
+    "step1Title": "Nhận đầu vào",
+    "step1Desc": "Ảnh JPG/PNG, video MP4, webcam hoặc IP camera",
+    "step2Title": "Tiền xử lý",
+    "step2Desc": "Resize frame về 640 × 640 px, chuẩn hoá pixel values",
+    "step3Title": "YOLOv8s ONNX",
+    "step3Desc": "Nhận diện mũ bảo hộ, đầu trần, vi phạm trực tiếp trên toàn khung hình",
+    "step4Title": "Theo dõi & xác nhận",
+    "step4Desc": "ByteTrack theo dõi track ID · rolling window 3/5 frame để lọc false positive",
+    "step5Title": "Trả kết quả",
+    "step5Desc": "BBox overlay, crop vi phạm, cảnh báo và báo cáo Gemini AI",
+    "personFirstBadge": "Tùy chọn nâng cao",
+    "personFirstTitle": "Pipeline 2 tầng — Person-First",
+    "personFirstToggleLabel": "Bật chế độ Person-First",
+    "personFirstToggleHint": "Tăng độ nhạy cho người ở xa hoặc bị che khuất",
+    "personFirstToggleNote": "Đang hiển thị quy trình Person-First — chỉ minh họa",
+    "personFirstApplies": "Áp dụng cho: Ảnh · Video · Live Stream · Webcam",
+    "personFirstDesc": "Thay vì kiểm tra toàn bộ khung hình, hệ thống phát hiện từng người trước, cắt lấy vùng thân trên, rồi nhận diện mũ bảo hộ trên từng vùng riêng. Cải thiện độ chính xác với người ở xa, ngồi hoặc bị che khuất một phần.",
+    "personFirstExtraStepTitle": "Phát hiện người",
+    "personFirstExtraStepDesc": "YOLOv8n xác định từng người, crop phần thân trên 60% chiều cao",
+    "step3PersonFirstDesc": "YOLOv8s ONNX chạy trên từng vùng crop thay vì toàn khung hình",
+    "personFirstStep1": "YOLOv8n phát hiện người",
+    "personFirstStep2": "Crop thân trên 60%",
+    "personFirstStep3": "YOLOv8s ONNX nhận diện mũ",
+    "personFirstStep4": "Ghép tọa độ về frame gốc"
+  },
+  "showcase": {
+    "eyebrow": "Kết quả thực tế",
+    "title": "Ví dụ nhận diện trên công trường",
+    "demo1Caption": "Nhận diện đa đối tượng với điểm confidence",
+    "demo1Detail": "Nhiều người trong cùng khung hình, mỗi người được gán nhãn riêng biệt",
+    "demo2Caption": "Phát hiện vi phạm không đội mũ",
+    "demo2Detail": "Vi phạm được đánh dấu rõ ràng và theo dõi liên tục qua các frame"
+  },
+  "modes": {
+    "sectionTitle": "Chọn chế độ nhận diện",
+    "imageTitle": "Nhận diện Ảnh",
+    "imageDesc": "Tải ảnh JPG/PNG — backend chạy YOLOv8s ONNX và trả về bounding box, nhãn class và confidence cho từng đối tượng.",
+    "imageDetail": "Kết quả hiển thị trực tiếp · Lịch sử vi phạm lưu lại · Điều chỉnh độ mờ bbox",
+    "videoTitle": "Theo dõi Video",
+    "videoDesc": "Upload video MP4 — hệ thống stream kết quả xử lý thời gian thực, theo dõi từng người qua ByteTrack và ghi nhận vi phạm.",
+    "videoDetail": "MJPEG stream · Seek đến thời điểm vi phạm · Xuất PDF báo cáo",
+    "liveTitle": "Luồng Trực tiếp",
+    "liveDesc": "Dùng webcam máy tính hoặc kết nối IP camera để giám sát liên tục gần thời gian thực với bbox overlay.",
+    "liveDetail": "Webcam máy tính · IP Camera cùng mạng · Cảnh báo vi phạm tức thì"
+  },
   "header": {
     "badge": "Nhận diện Mũ Bảo hộ",
     "title": "Bảng điều khiển Giám sát PPE",
@@ -61,12 +122,28 @@
     "sectionTitle": "Theo dõi đối tượng qua video",
     "uploadIdle": "Tải video lên để theo dõi",
     "uploadLoading": "Đang tải video...",
+    "uploadedReady": "Video đã tải xong. Chọn class cần hiển thị rồi bấm bắt đầu.",
     "streamingStatus": "Đang phát luồng theo dõi",
     "defaultStatus": "Chọn một tệp video để bắt đầu xử lý và theo dõi đối tượng.",
     "failure": "Tải video thất bại. Vui lòng kiểm tra lại Backend và thử lại."
   },
   "bboxControls": {
-    "opacityLabel": "Độ mờ hộp nhận diện"
+    "opacityLabel": "Độ mờ hộp nhận diện",
+    "filterLabel": "Hiển thị class",
+    "filterAll": "Tất cả",
+    "filterNone": "Bỏ chọn tất cả",
+    "classHelmet": "Helmet (có mũ)",
+    "classHead": "Head (đầu trần)",
+    "classNonHelmet": "Non-Helmet (vi phạm)",
+    "classPerson": "Person (người)",
+    "activeFilterLabel": "Đang lọc:"
+  },
+  "detection": {
+    "startButton": "Bắt đầu nhận dạng",
+    "uploadedReady": "Video đã tải lên. Chỉnh bộ lọc rồi bấm bắt đầu.",
+    "previewReady": "Webcam đã kết nối. Chỉnh bộ lọc rồi bấm bắt đầu.",
+    "ipcamReady": "IP Camera đã xác nhận. Chỉnh bộ lọc rồi bấm bắt đầu.",
+    "filterPresetNote": "Bộ lọc được áp dụng trước khi stream — không thể thay đổi realtime."
   },
   "liveStream": {
     "sectionTitle": "Luồng Trực tiếp",

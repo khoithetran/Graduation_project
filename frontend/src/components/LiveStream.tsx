@@ -6,7 +6,12 @@ import type { LiveAlert } from '../types';
 import { getColor } from './BBoxCanvas';
 import { ReportModal } from './ReportModal';
 
-type Mode = 'idle' | 'webcam' | 'ipcam';
+type Mode =
+  | 'idle'
+  | 'webcam-preview'   // getUserMedia done, video visible, inference NOT yet started
+  | 'webcam-active'    // inference loop running
+  | 'ipcam-ready'      // URL validated, stream NOT yet started
+  | 'ipcam-active';    // MJPEG stream running
 
 type FrameDetection = {
   class_name: string;
@@ -17,12 +22,31 @@ type FrameDetection = {
   y2: number;
 };
 
+type PersonBox = {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  track_id?: number | null;
+};
+
+const HELMET_CLASSES = ['helmet', 'head', 'non-helmet'] as const;
+const CLASS_LABELS: Record<string, string> = {
+  helmet: appText.bboxControls.classHelmet,
+  head: appText.bboxControls.classHead,
+  'non-helmet': appText.bboxControls.classNonHelmet,
+  person: appText.bboxControls.classPerson,
+};
+const PERSON_BOX_COLOR = '#ff8c00';
+
 function drawBboxes(
   canvas: HTMLCanvasElement,
   video: HTMLVideoElement,
   detections: FrameDetection[],
+  personBoxes: PersonBox[],
   sendW: number,
   sendH: number,
+  activeClasses: Set<string>,
 ): void {
   const ctx = canvas.getContext('2d');
   if (!ctx || !video.videoWidth || !video.videoHeight) return;
@@ -45,7 +69,36 @@ function drawBboxes(
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+  // Draw person boxes (thin, distinct color)
+  if (activeClasses.has('person')) {
+    for (const pb of personBoxes) {
+      const sx = pb.x1 * toNativeX * s + offsetX;
+      const sy = pb.y1 * toNativeY * s + offsetY;
+      const sw = (pb.x2 - pb.x1) * toNativeX * s;
+      const sh = (pb.y2 - pb.y1) * toNativeY * s;
+
+      ctx.strokeStyle = PERSON_BOX_COLOR;
+      ctx.lineWidth = dpr;
+      ctx.setLineDash([4 * dpr, 2 * dpr]);
+      ctx.strokeRect(sx, sy, sw, sh);
+      ctx.setLineDash([]);
+
+      // Track ID label
+      const pid = pb.track_id != null ? `P${pb.track_id}` : 'P?';
+      const fontSize = Math.max(10 * dpr, canvas.width / 80);
+      ctx.font = `${fontSize}px monospace`;
+      const labelY = sy > fontSize + 2 ? sy - 2 : sy + sh + fontSize + 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(sx, labelY - fontSize, ctx.measureText(pid).width + 6, fontSize + 3);
+      ctx.fillStyle = PERSON_BOX_COLOR;
+      ctx.fillText(pid, sx + 3, labelY);
+    }
+  }
+
+  // Draw helmet detections
   for (const det of detections) {
+    if (!activeClasses.has(det.class_name)) continue;
+
     const sx = det.x1 * toNativeX * s + offsetX;
     const sy = det.y1 * toNativeY * s + offsetY;
     const sw = (det.x2 - det.x1) * toNativeX * s;
@@ -68,7 +121,11 @@ function drawBboxes(
   }
 }
 
-export function LiveStream() {
+interface Props {
+  personFirst: boolean;
+}
+
+export function LiveStream({ personFirst }: Props) {
   const sessionId = useMemo(() => crypto.randomUUID(), []);
 
   const [mode, setMode] = useState<Mode>('idle');
@@ -81,89 +138,42 @@ export function LiveStream() {
   const [urlInput, setUrlInput] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const availableClasses = personFirst
+    ? [...HELMET_CLASSES, 'person']
+    : [...HELMET_CLASSES];
+  const [activeClasses, setActiveClasses] = useState<Set<string>>(new Set(availableClasses));
+
+  // Sync when personFirst changes and not yet active
+  useEffect(() => {
+    if (mode === 'idle' || mode === 'webcam-preview' || mode === 'ipcam-ready') {
+      setActiveClasses(new Set(personFirst ? [...HELMET_CLASSES, 'person'] : [...HELMET_CLASSES]));
+    }
+  }, [personFirst, mode]);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
-  // Store stream separately — videoRef.current becomes null when <video> is removed from DOM
   const activeStreamRef = useRef<MediaStream | null>(null);
+  // cancelRef controls whether the webcam inference loop is running
+  const inferenceActiveRef = useRef(false);
+  // Keep a ref so the inference loop always reads the latest filter without restart
+  const activeClassesRef = useRef(activeClasses);
+  useEffect(() => { activeClassesRef.current = activeClasses; }, [activeClasses]);
 
-  // ── Webcam mode ──────────────────────────────────────────────────────────
+  // ── Webcam preview (getUserMedia, no inference yet) ──────────────────────
   useEffect(() => {
-    if (mode !== 'webcam') return;
+    if (mode !== 'webcam-preview') return;
 
     let cancelled = false;
-    // Off-screen canvas for resizing frames before upload
-    const captureCanvas = document.createElement('canvas');
-    // Max width sent to backend — smaller = faster inference
-    const MAX_SEND_W = 640;
 
     const start = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
-          return;
-        }
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         activeStreamRef.current = stream;
         const video = videoRef.current;
         if (!video) return;
         video.srcObject = stream;
         await video.play();
-
-        // Continuous loop: capture → infer → draw → repeat immediately.
-        // Only 1 request in-flight at a time → no backpressure, minimal lag.
-        const loop = async () => {
-          if (cancelled) return;
-          const v = videoRef.current;
-          if (!v || !v.videoWidth) {
-            setTimeout(loop, 50);
-            return;
-          }
-
-          // Resize to MAX_SEND_W (keep aspect ratio) — reduces transfer + inference time
-          const scale = Math.min(1, MAX_SEND_W / v.videoWidth);
-          const sendW = Math.round(v.videoWidth * scale);
-          const sendH = Math.round(v.videoHeight * scale);
-          captureCanvas.width = sendW;
-          captureCanvas.height = sendH;
-          captureCanvas.getContext('2d')!.drawImage(v, 0, 0, sendW, sendH);
-
-          const blob = await new Promise<Blob | null>((res) =>
-            captureCanvas.toBlob(res, 'image/jpeg', 0.75),
-          );
-          if (!blob || cancelled) { loop(); return; }
-
-          const form = new FormData();
-          form.append('file', blob, 'frame.jpg');
-          form.append('session_id', sessionId);
-
-          try {
-            const res = await fetch(`${API_BASE}/api/live/webcam/frame`, {
-              method: 'POST',
-              body: form,
-            });
-            if (cancelled) return;
-            if (!res.ok) {
-              console.error('Webcam frame error:', res.status, await res.text());
-            } else {
-              const data = (await res.json()) as {
-                detections: FrameDetection[];
-                alerts: LiveAlert[];
-              };
-              if (overlayRef.current && videoRef.current) {
-                drawBboxes(overlayRef.current, videoRef.current, data.detections, sendW, sendH);
-              }
-              if (data.alerts.length > 0) {
-                setAlerts((prev) => [...data.alerts, ...prev].slice(0, 50));
-              }
-            }
-          } catch (err) {
-            console.error('Webcam frame fetch failed:', err);
-          }
-
-          loop();
-        };
-
-        loop();
       } catch {
         if (!cancelled) {
           setErrorMessage(appText.liveStream.webcamError);
@@ -176,39 +186,105 @@ export function LiveStream() {
 
     return () => {
       cancelled = true;
-      // Use activeStreamRef — guaranteed non-null even after <video> is removed from DOM
-      if (activeStreamRef.current) {
-        activeStreamRef.current.getTracks().forEach((t) => t.stop());
-        activeStreamRef.current = null;
+    };
+  }, [mode]);
+
+  // ── Webcam active (inference loop) ───────────────────────────────────────
+  useEffect(() => {
+    if (mode !== 'webcam-active') return;
+
+    inferenceActiveRef.current = true;
+    const captureCanvas = document.createElement('canvas');
+    const MAX_SEND_W = 640;
+
+    const loop = async () => {
+      if (!inferenceActiveRef.current) return;
+      const v = videoRef.current;
+      if (!v || !v.videoWidth) {
+        setTimeout(loop, 50);
+        return;
       }
+
+      const scale = Math.min(1, MAX_SEND_W / v.videoWidth);
+      const sendW = Math.round(v.videoWidth * scale);
+      const sendH = Math.round(v.videoHeight * scale);
+      captureCanvas.width = sendW;
+      captureCanvas.height = sendH;
+      captureCanvas.getContext('2d')!.drawImage(v, 0, 0, sendW, sendH);
+
+      const blob = await new Promise<Blob | null>((res) =>
+        captureCanvas.toBlob(res, 'image/jpeg', 0.75),
+      );
+      if (!blob || !inferenceActiveRef.current) { loop(); return; }
+
+      const form = new FormData();
+      form.append('file', blob, 'frame.jpg');
+      form.append('session_id', sessionId);
+      form.append('person_first', String(personFirst));
+
+      try {
+        const res = await fetch(`${API_BASE}/api/live/webcam/frame`, {
+          method: 'POST',
+          body: form,
+        });
+        if (!inferenceActiveRef.current) return;
+        if (res.ok) {
+          const data = (await res.json()) as {
+            detections: FrameDetection[];
+            alerts: LiveAlert[];
+            person_boxes: PersonBox[];
+          };
+          if (overlayRef.current && videoRef.current) {
+            drawBboxes(
+              overlayRef.current,
+              videoRef.current,
+              data.detections,
+              data.person_boxes ?? [],
+              sendW,
+              sendH,
+              activeClassesRef.current,
+            );
+          }
+          const filteredAlerts = data.alerts.filter(
+            (a) => activeClassesRef.current.has(a.class_name),
+          );
+          if (filteredAlerts.length > 0) {
+            setAlerts((prev) => [...filteredAlerts, ...prev].slice(0, 50));
+          }
+        }
+      } catch {
+        // ignore frame errors
+      }
+
+      loop();
+    };
+
+    loop();
+
+    return () => {
+      inferenceActiveRef.current = false;
       if (overlayRef.current) {
         overlayRef.current.getContext('2d')?.clearRect(
-          0,
-          0,
-          overlayRef.current.width,
-          overlayRef.current.height,
+          0, 0, overlayRef.current.width, overlayRef.current.height,
         );
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, sessionId]);
 
-  // ── IP Camera — alert polling ────────────────────────────────────────────
+  // ── IP Camera alert polling ──────────────────────────────────────────────
   useEffect(() => {
-    if (mode !== 'ipcam' || !liveId) return;
+    if (mode !== 'ipcam-active' || !liveId) return;
 
     let cancelled = false;
 
     const poll = async () => {
       try {
-        const res = await fetch(`${API_BASE}/api/live/alerts/${liveId}`, {
-          cache: 'no-store',
-        });
+        const res = await fetch(`${API_BASE}/api/live/alerts/${liveId}`, { cache: 'no-store' });
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as LiveAlert[];
         if (!cancelled) setAlerts([...data].reverse().slice(0, 50));
-      } catch {
-        // Backend unreachable — retry next interval
-      }
+      } catch { /* retry next tick */ }
     };
 
     poll();
@@ -220,10 +296,15 @@ export function LiveStream() {
   }, [mode, liveId]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
-  const handleWebcam = () => {
+
+  const handleWebcamClick = () => {
     setErrorMessage('');
     setAlerts([]);
-    setMode('webcam');
+    setMode('webcam-preview');
+  };
+
+  const handleStartWebcam = () => {
+    setMode('webcam-active');
   };
 
   const handleIpcamConnect = async () => {
@@ -243,15 +324,44 @@ export function LiveStream() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const { live_id } = (await res.json()) as { live_id: string; source: string };
       setLiveId(live_id);
-      setStreamUrl(
-        `${API_BASE}/api/live/stream?live_id=${encodeURIComponent(live_id)}`,
-      );
-      setMode('ipcam');
+      setMode('ipcam-ready');
     } catch {
       setErrorMessage(appText.liveStream.ipcamError);
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  const handleStartIpcam = () => {
+    if (!liveId) return;
+    const classParam = [...activeClasses].join(',');
+    const url =
+      `${API_BASE}/api/live/stream` +
+      `?live_id=${encodeURIComponent(liveId)}` +
+      `&classes=${encodeURIComponent(classParam)}`;
+    setStreamUrl(url);
+    setMode('ipcam-active');
+  };
+
+  const toggleClass = (cls: string) => {
+    setActiveClasses((prev) => {
+      const next = new Set(prev);
+      if (next.has(cls)) { next.delete(cls); } else { next.add(cls); }
+      return next;
+    });
+  };
+
+  const handleStop = () => {
+    inferenceActiveRef.current = false;
+    if (activeStreamRef.current) {
+      activeStreamRef.current.getTracks().forEach((t) => t.stop());
+      activeStreamRef.current = null;
+    }
+    setMode('idle');
+    setStreamUrl(null);
+    setLiveId(null);
+    setAlerts([]);
+    setErrorMessage('');
   };
 
   const handleDownloadPdf = async () => {
@@ -287,35 +397,69 @@ export function LiveStream() {
     }
   };
 
-  const handleStop = () => {
-    setMode('idle');
-    setStreamUrl(null);
-    setLiveId(null);
-    setAlerts([]);
-    setErrorMessage('');
-  };
+  // ── Filter panel (reused for webcam-preview, ipcam-ready) ────────────────
+  const ClassFilterPanel = ({ note }: { note: string }) => (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-stone-300">{appText.bboxControls.filterLabel}</p>
+        <p className="text-[10px] text-stone-500">{note}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {availableClasses.map((cls) => {
+          const active = activeClasses.has(cls);
+          const color = getColor(cls);
+          return (
+            <button
+              key={cls}
+              onClick={() => toggleClass(cls)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                active
+                  ? 'border-white/20 bg-white/10 text-stone-100'
+                  : 'border-white/5 bg-stone-950/50 text-stone-500'
+              }`}
+            >
+              <span
+                className="h-2 w-2 rounded-full flex-shrink-0"
+                style={{ backgroundColor: active ? color : '#525252' }}
+              />
+              {CLASS_LABELS[cls]}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
-  const isConnected = mode === 'webcam' || mode === 'ipcam';
+  const isLiveActive = mode === 'webcam-active' || mode === 'ipcam-active';
+  const isVideoVisible = mode === 'webcam-preview' || mode === 'webcam-active';
+  const showFeed = isLiveActive || isVideoVisible;
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* Feed container */}
-      {isConnected ? (
+
+      {/* ── Feed container (visible while webcam is running or ipcam active) ── */}
+      {showFeed ? (
         <div className="overflow-hidden rounded-[1.75rem] border border-white/10 bg-stone-950 transition">
-          {/* Header bar */}
+          {/* Header */}
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
             <p className="text-sm font-semibold text-white">
               {appText.liveStream.sectionTitle}
             </p>
-            <span className="rounded-full border border-red-400/20 bg-red-400/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-red-200">
-              ● LIVE
-            </span>
+            {isLiveActive ? (
+              <span className="rounded-full border border-red-400/20 bg-red-400/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-red-200">
+                ● LIVE
+              </span>
+            ) : (
+              <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs text-amber-200">
+                {appText.liveStream.webcamConnecting}
+              </span>
+            )}
           </div>
 
-          {/* Feed */}
+          {/* Feed area */}
           <div className="relative">
-            {mode === 'webcam' && (
+            {isVideoVisible && (
               <>
                 <video
                   ref={videoRef}
@@ -331,7 +475,7 @@ export function LiveStream() {
               </>
             )}
 
-            {mode === 'ipcam' && streamUrl && (
+            {mode === 'ipcam-active' && streamUrl && (
               <img
                 src={streamUrl}
                 alt="IP Camera stream"
@@ -349,29 +493,86 @@ export function LiveStream() {
               aria-label="Stop stream"
               className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-stone-900/80 text-stone-300 backdrop-blur transition hover:bg-red-500 hover:text-white"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-4 w-4"
-              >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
           </div>
+
+          {/* Active class indicator (shown when inference is live) */}
+          {isLiveActive && activeClasses.size > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-white/[0.06] px-4 py-2">
+              <span className="text-[10px] text-stone-500">{appText.bboxControls.activeFilterLabel}</span>
+              {[...activeClasses].map((cls) => {
+                const color = getColor(cls);
+                return (
+                  <span
+                    key={cls}
+                    className="flex items-center gap-1 rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 text-[10px] font-medium text-stone-200"
+                  >
+                    <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full" style={{ backgroundColor: color }} />
+                    {CLASS_LABELS[cls]}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Webcam preview: filter + start button */}
+          {mode === 'webcam-preview' && (
+            <div className="space-y-4 p-5 border-t border-white/10">
+              <p className="text-sm text-stone-400">{appText.detection.previewReady}</p>
+              <ClassFilterPanel note="Bộ lọc áp dụng realtime trên canvas — có thể thay đổi khi đang chạy" />
+              <button
+                onClick={handleStartWebcam}
+                disabled={activeClasses.size === 0}
+                className="w-full rounded-2xl bg-amber-300 py-3 text-sm font-bold text-stone-950 transition hover:bg-amber-200 disabled:opacity-40"
+              >
+                {appText.detection.startButton}
+              </button>
+            </div>
+          )}
+        </div>
+      ) : mode === 'ipcam-ready' ? (
+        /* ── IP camera ready: filter + start ─── */
+        <div className="overflow-hidden rounded-[1.75rem] border border-amber-400/20 bg-stone-950">
+          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+            <p className="text-sm font-semibold text-white">{appText.liveStream.sectionTitle}</p>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-1 text-xs text-amber-200">
+                IP Camera
+              </span>
+              <button
+                onClick={handleStop}
+                aria-label="Cancel"
+                className="flex h-7 w-7 items-center justify-center rounded-full bg-stone-900/80 text-stone-400 backdrop-blur transition hover:bg-red-500 hover:text-white"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div className="space-y-4 p-5">
+            <p className="text-sm text-stone-400">{appText.detection.ipcamReady}</p>
+            <ClassFilterPanel note={appText.detection.filterPresetNote} />
+            <button
+              onClick={handleStartIpcam}
+              disabled={activeClasses.size === 0}
+              className="w-full rounded-2xl bg-amber-300 py-3 text-sm font-bold text-stone-950 transition hover:bg-amber-200 disabled:opacity-40"
+            >
+              {appText.detection.startButton}
+            </button>
+          </div>
         </div>
       ) : (
-        /* Idle / connect zone */
+        /* ── Idle / connect zone ─── */
         <div className="flex aspect-video flex-col items-center justify-center gap-5 overflow-hidden rounded-[1.75rem] border border-dashed border-white/10 bg-stone-950 transition hover:border-amber-400/20">
           {/* Mode buttons */}
           <div className="flex gap-4">
             <button
-              onClick={handleWebcam}
+              onClick={handleWebcamClick}
               className="flex flex-col items-center gap-2 rounded-[1.25rem] border border-white/10 bg-white/5 px-8 py-5 text-center transition hover:border-amber-400/40 hover:bg-stone-900/60"
             >
               <span className="text-3xl">📷</span>
@@ -400,9 +601,7 @@ export function LiveStream() {
               type="text"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleIpcamConnect();
-              }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleIpcamConnect(); }}
               placeholder={appText.liveStream.urlPlaceholder}
               className="flex-1 rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-stone-200 placeholder-stone-600 outline-none focus:border-amber-400/40"
             />
@@ -415,7 +614,6 @@ export function LiveStream() {
             </button>
           </div>
 
-          {/* Phone guide */}
           <p className="px-6 text-center text-xs text-stone-600">
             {appText.liveStream.phoneGuide}
           </p>
@@ -466,18 +664,11 @@ export function LiveStream() {
                   className="w-full rounded-[1.25rem] border border-white/10 bg-stone-950/70"
                 >
                   <div className="overflow-hidden rounded-t-[1.25rem] bg-stone-900">
-                    <img
-                      src={alert.crop}
-                      alt={alert.class_name}
-                      className="h-36 w-full object-contain"
-                    />
+                    <img src={alert.crop} alt={alert.class_name} className="h-36 w-full object-contain" />
                   </div>
                   <div className="flex items-center justify-between gap-3 p-4">
                     <div>
-                      <p
-                        className="text-sm font-semibold uppercase tracking-[0.2em]"
-                        style={{ color }}
-                      >
+                      <p className="text-sm font-semibold uppercase tracking-[0.2em]" style={{ color }}>
                         {alert.class_name}
                       </p>
                       <p className="mt-1 text-xl font-bold text-white">
