@@ -23,6 +23,7 @@ export const CLASS_COLORS: Record<string, string> = {
   helmet: '#22c55e',
   head: '#ef4444',
   'non-helmet': '#eab308',
+  person: '#ff8c00',
 };
 
 export function getColor(className: string): string {
@@ -47,6 +48,8 @@ interface BBoxCanvasProps {
   opacity: number;
   highlightedId?: string | null;
   className?: string;
+  /** When set, only detections whose class_name is in this set are drawn. */
+  filteredClasses?: Set<string>;
 }
 
 function drawBox(
@@ -105,7 +108,7 @@ function drawBox(
   ctx.fillText(label, x + 4, textY);
 }
 
-export function BBoxCanvas({ imageSrc, detections, opacity, highlightedId, className }: BBoxCanvasProps) {
+export function BBoxCanvas({ imageSrc, detections, opacity, highlightedId, className, filteredClasses }: BBoxCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -124,16 +127,20 @@ export function BBoxCanvas({ imageSrc, detections, opacity, highlightedId, class
 
       ctx.drawImage(img, 0, 0, w, h);
 
+      const visible = filteredClasses
+        ? detections.filter((d) => filteredClasses.has(d.class_name))
+        : detections;
+
       // Draw non-highlighted boxes first, highlighted on top
-      for (const det of detections) {
+      for (const det of visible) {
         if (det.id !== highlightedId) drawBox(ctx, det, w, h, opacity, false);
       }
-      for (const det of detections) {
+      for (const det of visible) {
         if (det.id === highlightedId) drawBox(ctx, det, w, h, opacity, true);
       }
     };
     img.src = imageSrc;
-  }, [imageSrc, detections, opacity, highlightedId]);
+  }, [imageSrc, detections, opacity, highlightedId, filteredClasses]);
 
   return (
     <canvas

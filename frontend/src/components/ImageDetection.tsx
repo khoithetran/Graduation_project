@@ -5,7 +5,24 @@ import { API_BASE } from '../services/api';
 import { BBoxCanvas, getColor, type Detection } from './BBoxCanvas';
 import { LoadingOverlay } from './LoadingOverlay';
 
-export function ImageDetection() {
+// Standard classes returned by the helmet model
+const HELMET_CLASSES = ['helmet', 'head', 'non-helmet'] as const;
+const CLASS_LABELS: Record<string, string> = {
+  helmet: appText.bboxControls.classHelmet,
+  head: appText.bboxControls.classHead,
+  'non-helmet': appText.bboxControls.classNonHelmet,
+  person: appText.bboxControls.classPerson,
+};
+
+interface Props {
+  personFirst: boolean;
+}
+
+export function ImageDetection({ personFirst }: Props) {
+  const availableClasses: string[] = personFirst
+    ? [...HELMET_CLASSES, 'person']
+    : [...HELMET_CLASSES];
+
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [cropUrls, setCropUrls] = useState<Record<string, string>>({});
@@ -13,6 +30,12 @@ export function ImageDetection() {
   const [statusMessage, setStatusMessage] = useState(appText.upload.defaultStatus);
   const [bboxOpacity, setBboxOpacity] = useState(0.35);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [activeClasses, setActiveClasses] = useState<Set<string>>(new Set(availableClasses));
+
+  // Sync filter when personFirst toggle changes
+  useEffect(() => {
+    setActiveClasses(new Set(personFirst ? [...HELMET_CLASSES, 'person'] : [...HELMET_CLASSES]));
+  }, [personFirst]);
 
   const imageContainerRef = useRef<HTMLDivElement>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -67,10 +90,13 @@ export function ImageDetection() {
       const form = new FormData();
       form.append('file', file);
       form.append('source', file.name);
+      form.append('person_first', String(personFirst));
       const res = await fetch(`${API_BASE}/api/detect/image`, { method: 'POST', body: form });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const payload = (await res.json()) as { boxes: Detection[] };
       setDetections(payload.boxes);
+      // Show all available classes (helmet+person when person-first, otherwise 3 helmet classes)
+      setActiveClasses(new Set(personFirst ? [...HELMET_CLASSES, 'person'] : [...HELMET_CLASSES]));
       setStatusMessage(
         payload.boxes.length > 0
           ? `${appText.upload.successFoundPrefix} ${payload.boxes.length} ${appText.upload.successFoundSuffix}`
@@ -92,6 +118,7 @@ export function ImageDetection() {
     setCropUrls({});
     setHighlightedId(null);
     setStatusMessage(appText.upload.defaultStatus);
+    setActiveClasses(new Set(personFirst ? [...HELMET_CLASSES, 'person'] : [...HELMET_CLASSES]));
   };
 
   const handleCardClick = (id: string) => {
@@ -100,6 +127,20 @@ export function ImageDetection() {
     imageContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     highlightTimerRef.current = setTimeout(() => setHighlightedId(null), 2500);
   };
+
+  const toggleClass = (cls: string) => {
+    setActiveClasses((prev) => {
+      const next = new Set(prev);
+      if (next.has(cls)) {
+        next.delete(cls);
+      } else {
+        next.add(cls);
+      }
+      return next;
+    });
+  };
+
+  const visibleDetections = detections.filter((d) => activeClasses.has(d.class_name));
 
   return (
     <div className="space-y-6">
@@ -131,6 +172,7 @@ export function ImageDetection() {
               detections={detections}
               opacity={bboxOpacity}
               highlightedId={highlightedId}
+              filteredClasses={activeClasses}
             />
           ) : (
             <img
@@ -167,86 +209,124 @@ export function ImageDetection() {
         </label>
       )}
 
-      {/* Opacity slider */}
+      {/* Controls: opacity + class filter */}
       {detections.length > 0 && (
-        <div className="flex items-center gap-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-          <p className="shrink-0 text-xs text-stone-400">{appText.bboxControls.opacityLabel}</p>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={bboxOpacity}
-            onChange={(e) => setBboxOpacity(parseFloat(e.target.value))}
-            className="flex-1 accent-amber-300"
-          />
-          <span className="w-12 shrink-0 text-right font-mono text-xs text-stone-300">
-            {Math.round(bboxOpacity * 100)}%
-          </span>
+        <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+          {/* Opacity */}
+          <div className="flex items-center gap-4">
+            <p className="shrink-0 text-xs text-stone-400">{appText.bboxControls.opacityLabel}</p>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={bboxOpacity}
+              onChange={(e) => setBboxOpacity(parseFloat(e.target.value))}
+              className="flex-1 accent-amber-300"
+            />
+            <span className="w-12 shrink-0 text-right font-mono text-xs text-stone-300">
+              {Math.round(bboxOpacity * 100)}%
+            </span>
+          </div>
+
+          {/* Class filter checklist */}
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="shrink-0 text-xs text-stone-400">{appText.bboxControls.filterLabel}:</p>
+            {availableClasses.map((cls) => {
+              const active = activeClasses.has(cls);
+              const color = getColor(cls);
+              return (
+                <button
+                  key={cls}
+                  onClick={() => toggleClass(cls)}
+                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    active
+                      ? 'border-white/20 bg-white/10 text-stone-100'
+                      : 'border-white/5 bg-stone-950/50 text-stone-500'
+                  }`}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: active ? color : '#525252' }}
+                  />
+                  {CLASS_LABELS[cls]}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Detection result cards */}
+      {/* Detection result cards — filtered */}
       {detections.length > 0 && (
         <section className="rounded-[1.75rem] border border-white/10 bg-white/5 p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-white">{appText.results.title}</h2>
             <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-stone-200">
-              {appText.meta.detectionsLabel}: {detections.length}
+              {appText.meta.detectionsLabel}: {visibleDetections.length}
+              {visibleDetections.length !== detections.length && (
+                <span className="ml-1 text-stone-400">/ {detections.length}</span>
+              )}
             </span>
           </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            {detections.map((det) => {
-              const color = getColor(det.class_name);
-              const isHighlighted = highlightedId === det.id;
-              return (
-                <button
-                  key={det.id}
-                  onClick={() => handleCardClick(det.id)}
-                  className={`group w-full rounded-[1.25rem] border text-left transition ${
-                    isHighlighted
-                      ? 'border-white/40 bg-white/10 shadow-lg'
-                      : 'border-white/10 bg-stone-950/70 hover:border-white/20 hover:bg-stone-900/80'
-                  }`}
-                >
-                  {/* Cropped image */}
-                  <div className="overflow-hidden rounded-t-[1.25rem] bg-stone-900">
-                    {cropUrls[det.id] ? (
-                      <img
-                        src={cropUrls[det.id]}
-                        alt={det.class_name}
-                        className="h-36 w-full object-contain"
-                      />
-                    ) : (
-                      <div className="flex h-36 items-center justify-center">
-                        <span className="text-xs text-stone-600">loading…</span>
-                      </div>
-                    )}
-                  </div>
+          {visibleDetections.length === 0 ? (
+            <p className="text-center text-sm text-stone-500">
+              Không có detection nào khớp bộ lọc đang chọn.
+            </p>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2">
+              {visibleDetections.map((det) => {
+                const color = getColor(det.class_name);
+                const isHighlighted = highlightedId === det.id;
+                return (
+                  <button
+                    key={det.id}
+                    onClick={() => handleCardClick(det.id)}
+                    className={`group w-full rounded-[1.25rem] border text-left transition ${
+                      isHighlighted
+                        ? 'border-white/40 bg-white/10 shadow-lg'
+                        : 'border-white/10 bg-stone-950/70 hover:border-white/20 hover:bg-stone-900/80'
+                    }`}
+                  >
+                    {/* Cropped image */}
+                    <div className="overflow-hidden rounded-t-[1.25rem] bg-stone-900">
+                      {cropUrls[det.id] ? (
+                        <img
+                          src={cropUrls[det.id]}
+                          alt={det.class_name}
+                          className="h-36 w-full object-contain"
+                        />
+                      ) : (
+                        <div className="flex h-36 items-center justify-center">
+                          <span className="text-xs text-stone-600">loading…</span>
+                        </div>
+                      )}
+                    </div>
 
-                  {/* Info row */}
-                  <div className="flex items-center justify-between gap-3 p-4">
-                    <div>
-                      <p className="text-sm font-semibold uppercase tracking-[0.2em]" style={{ color }}>
-                        {det.class_name}
-                      </p>
-                      <p className="mt-1 text-xl font-bold text-white">
-                        {(det.confidence * 100).toFixed(1)}%
-                      </p>
+                    {/* Info row */}
+                    <div className="flex items-center justify-between gap-3 p-4">
+                      <div>
+                        <p className="text-sm font-semibold uppercase tracking-[0.2em]" style={{ color }}>
+                          {det.class_name}
+                        </p>
+                        <p className="mt-1 text-xl font-bold text-white">
+                          {(det.confidence * 100).toFixed(1)}%
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="rounded-full bg-amber-300/10 px-3 py-1 text-xs text-amber-200">
+                          {det.id}
+                        </span>
+                        <p className="mt-2 text-xs text-stone-500 group-hover:text-stone-400">
+                          Click to highlight ↑
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="rounded-full bg-amber-300/10 px-3 py-1 text-xs text-amber-200">
-                        {det.id}
-                      </span>
-                      <p className="mt-2 text-xs text-stone-500 group-hover:text-stone-400">
-                        Click to highlight ↑
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </section>
       )}
     </div>
