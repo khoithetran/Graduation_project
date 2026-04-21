@@ -236,7 +236,13 @@ class Predictor:
         detections: list[DetectionBoxOut] = []
         for index, box in enumerate(result.boxes):
             class_id = int(box.cls[0].item())
-            class_name = str(result.names.get(class_id, str(class_id)))
+            raw_name = str(result.names.get(class_id, str(class_id)))
+            if is_head_class(raw_name):
+                class_name = "head"
+            elif is_nonhelmet_class(raw_name):
+                class_name = "non-helmet"
+            else:
+                class_name = "helmet"
             confidence = float(box.conf[0].item())
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             x1_i, y1_i, x2_i, y2_i = clamp_bbox(x1, y1, x2, y2, width=width, height=height)

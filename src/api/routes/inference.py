@@ -2,12 +2,14 @@
 
 import logging
 
+import cv2
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from src.api.rate_limit import limiter
-from src.api.schemas import DetectImageResponse, HealthResponse, PredictResponse
+from src.api.schemas import DetectImageResponse, DetectionBoxOut, HealthResponse, PredictResponse
 from src.config.settings import get_settings
 from src.core.history import persist_image_event
+from src.core.person_first import make_person_first_pipeline
 from src.core.predictor import get_predictor
 from src.utils.detection import classify_event
 from src.utils.image import decode_image_bytes, pil_to_numpy
@@ -65,6 +67,7 @@ async def predict(request: Request, file: UploadFile = File(...)) -> PredictResp
 async def detect_image(
     file: UploadFile = File(...),
     source: str | None = Form(None),
+    person_first: bool = Form(False),
 ) -> DetectImageResponse:
     """Run legacy image detection used by the frontend dashboard."""
     predictor = get_predictor()
@@ -85,25 +88,74 @@ async def detect_image(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        boxes = predictor.detect_image(pil_to_numpy(image))
+        if person_first:
+            bgr = cv2.cvtColor(pil_to_numpy(image), cv2.COLOR_RGB2BGR)
+            pipeline = make_person_first_pipeline()
+            height, width = bgr.shape[:2]
+            pf_results = pipeline.process_frame(bgr, use_tracking=False)
+
+            detect_boxes: list[DetectionBoxOut] = []
+            for i, r in enumerate(pf_results):
+                bw = r.helmet_x2 - r.helmet_x1
+                bh = r.helmet_y2 - r.helmet_y1
+                if bw <= 1 or bh <= 1:
+                    continue
+                detect_boxes.append(DetectionBoxOut(
+                    id=f"box_{i}",
+                    class_name=r.helmet_class,
+                    confidence=r.helmet_conf,
+                    x=r.helmet_x1 / width,
+                    y=r.helmet_y1 / height,
+                    width=bw / width,
+                    height=bh / height,
+                    x1=r.helmet_x1,
+                    y1=r.helmet_y1,
+                    x2=r.helmet_x2,
+                    y2=r.helmet_y2,
+                ))
+
+            person_display_boxes: list[DetectionBoxOut] = []
+            for j, (px1, py1, px2, py2, pconf, _tid) in enumerate(pipeline._last_persons):
+                bw = px2 - px1
+                bh = py2 - py1
+                if bw <= 1 or bh <= 1:
+                    continue
+                person_display_boxes.append(DetectionBoxOut(
+                    id=f"person_{j}",
+                    class_name="person",
+                    confidence=pconf,
+                    x=px1 / width,
+                    y=py1 / height,
+                    width=bw / width,
+                    height=bh / height,
+                    x1=px1,
+                    y1=py1,
+                    x2=px2,
+                    y2=py2,
+                ))
+
+            all_boxes = detect_boxes + person_display_boxes
+        else:
+            detect_boxes = predictor.detect_image(pil_to_numpy(image))
+            all_boxes = detect_boxes
     except Exception as exc:
         logger.exception("Inference failed for /api/detect/image.")
         raise HTTPException(status_code=500, detail="Inference failed.") from exc
 
-    event_type = classify_event(boxes)
+    event_type = classify_event(detect_boxes)
     is_video_frame = bool(file.filename and file.filename.startswith("frame"))
     if is_video_frame or event_type == "NONE":
-        return DetectImageResponse(boxes=boxes, event_type=event_type)
+        return DetectImageResponse(boxes=all_boxes, event_type=event_type)
 
     history_event = persist_image_event(
         image=image,
-        boxes=boxes,
+        boxes=detect_boxes,
         source=source or file.filename or "Uploaded image",
         event_type=event_type,
     )
 
     return DetectImageResponse(
-        boxes=boxes,
+        boxes=all_boxes,
         global_image_url=history_event.global_image_url if history_event else None,
         crop_image_urls=history_event.crop_image_urls if history_event else [],
         event_type=event_type,
