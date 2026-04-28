@@ -191,6 +191,51 @@ When person-first is active:
 
 ---
 
+## Model Training
+
+> Full training notebook: [`notebooks/Model_trainer.ipynb`](notebooks/Model_trainer.ipynb) — designed to run on **Kaggle** with a GPU accelerator.
+
+### Dataset
+
+Three Kaggle datasets were merged and re-labelled into a unified 3-class scheme:
+
+| Dataset | Source images | Notes |
+|---------|:-------------:|-------|
+| `kltn-dataset-3class` | 5 165 | Class 3 (other) dropped |
+| `kltn-dataset-hat-cap` | 950 | Class 0 re-mapped → 2 (non-helmet) |
+| `kltn-dataset-cap-hat-v2` | 12 147 | Classes 0 & 2 unified → 2; classes 1 & 3 dropped |
+| **Total** | **18 262** | 80 / 10 / 10 train / val / test split |
+
+**Class map:**
+
+| ID | Name | Meaning |
+|----|------|---------|
+| 0 | `helmet` | Hard hat worn correctly |
+| 1 | `head` | Bare head (violation) |
+| 2 | `non_helmet` | Soft cap / non-compliant headwear |
+
+### Architecture — YOLOv8s + ADSC
+
+The base `yolov8s-p2.yaml` (4-scale P2–P5 head) was extended with an **ADSC wrapper** patched onto the final `Detect` layer:
+
+- **`ASFF4`** — Adaptive Spatial Feature Fusion across all 4 scales via learnable per-location softmax weights.
+- **`PseudoDCNv2`** — Deformable-convolution approximation: a depth-wise attention gate modulates the dilated conv input, avoiding the full offset-field overhead.
+- **`UpsampleCARAFE`** — Content-aware upsampling that predicts a per-pixel reassembly kernel instead of bilinear interpolation.
+
+Pre-trained weights from `yolov8s.pt` were transferred (219 / 437 layers matched).
+
+### Training Configuration
+
+```
+epochs   : 50
+batch    : 16
+imgsz    : 640
+device   : GPU (Kaggle T4)
+amp      : False   # disabled for numerical stability with custom layers
+```
+
+---
+
 ## Model Optimization
 
 The model was originally trained as a YOLOv8s PyTorch checkpoint (`.pt`). For cloud deployment it was converted to ONNX format:
@@ -260,6 +305,8 @@ Real-time ByteTrack tracking demonstration:
 │       ├── content/
 │       │   └── app-text.vi.json   # Vietnamese i18n strings
 │       └── services/api.ts
+├── notebooks/
+│   └── Model_trainer.ipynb # Kaggle training notebook (dataset merge → ADSC → YOLOv8s train)
 ├── models/                 # Model weights (yolov8s_ap.onnx) — gitignored
 ├── demo/                   # Real-world validation samples
 ├── Dockerfile              # Multi-stage build: Node (React) → Python (FastAPI)

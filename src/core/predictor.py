@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from threading import Lock
 from typing import Any, ClassVar
@@ -90,13 +91,18 @@ class Predictor:
         if self._model is None:
             raise RuntimeError("Model could not be loaded.")
 
-        return self._model.predict(
+        t0 = time.perf_counter()
+        results = self._model.predict(
             image_source,
             conf=self.settings.confidence_threshold,
             imgsz=self.settings.image_size,
             verbose=False,
             device=self._device,
         )
+        latency_ms = (time.perf_counter() - t0) * 1000
+        fps = 1000.0 / latency_ms if latency_ms > 0 else float("inf")
+        logger.info("[Performance] Latency: %.1fms | FPS: %.1f", latency_ms, fps)
+        return results
 
     def track_frame(self, frame: np.ndarray, tracker: str = "bytetrack.yaml") -> list[Any]:
         """Run ByteTrack on a single BGR frame with persistent state.
@@ -115,7 +121,8 @@ class Predictor:
             self.load_model()
         if self._model is None:
             raise RuntimeError("Model could not be loaded.")
-        return self._model.track(
+        t0 = time.perf_counter()
+        results = self._model.track(
             frame,
             tracker=tracker,
             persist=True,
@@ -124,6 +131,10 @@ class Predictor:
             verbose=False,
             device=self._device,
         )
+        latency_ms = (time.perf_counter() - t0) * 1000
+        fps = 1000.0 / latency_ms if latency_ms > 0 else float("inf")
+        logger.info("[Performance] Latency: %.1fms | FPS: %.1f", latency_ms, fps)
+        return results
 
 
     def detect_image(self, image: np.ndarray) -> list[DetectionBoxOut]:
