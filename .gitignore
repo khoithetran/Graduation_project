@@ -45,6 +45,11 @@ frontend/.vite/
 # Runtime data — gitkeep placeholders keep dirs in tree; contents are excluded
 *.log
 demo/video_demo.mp4
+data/videos/
+data/history/
+data/reports/
+data/temp_videos/
+data/update_pool/
 
 # Local backend leftovers
 backend/__pycache__/
